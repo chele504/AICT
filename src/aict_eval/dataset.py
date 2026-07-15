@@ -15,6 +15,7 @@ from torchvision import transforms
 from transformers import AutoTokenizer
 
 from .config import AICTConfig
+from .filters import DenoiseParams, denoise_dataframe
 
 
 @dataclass
@@ -95,6 +96,30 @@ def prepare_splits(df: pd.DataFrame, config: AICTConfig) -> SplitBundle:
         text_column=config.train.text_column,
         image_column=config.train.image_column,
     )
+    if config.train.denoise_enabled:
+        params = DenoiseParams(
+            method=config.train.denoise_method,
+            kalman_process_variance=config.train.kalman_process_variance,
+            kalman_measurement_variance=config.train.kalman_measurement_variance,
+            ema_alpha=config.train.ema_alpha,
+            ema_min_alpha=config.train.ema_min_alpha,
+            ema_max_alpha=config.train.ema_max_alpha,
+            ema_window=config.train.ema_window,
+        )
+        train_df = denoise_dataframe(
+            train_df,
+            tabular_columns,
+            params,
+            group_column=config.train.denoise_group_column,
+            sort_column=config.train.denoise_sort_column,
+        )
+        val_df = denoise_dataframe(
+            val_df,
+            tabular_columns,
+            params,
+            group_column=config.train.denoise_group_column,
+            sort_column=config.train.denoise_sort_column,
+        )
     scaler = StandardScaler()
     train_df = train_df.copy()
     val_df = val_df.copy()
@@ -109,10 +134,16 @@ class AICTDataset(Dataset):
         df: pd.DataFrame,
         config: AICTConfig,
         tabular_columns: Sequence[str],
+        tabular_weights: np.ndarray | None = None,
     ) -> None:
         self.df = df.reset_index(drop=True)
         self.config = config
         self.tabular_columns = list(tabular_columns)
+        self.tabular_weights = (
+            np.asarray(tabular_weights, dtype=np.float32)
+            if tabular_weights is not None
+            else None
+        )
         self.tokenizer = build_tokenizer(config)
         self.image_transform = transforms.Compose(
             [
@@ -146,9 +177,15 @@ class AICTDataset(Dataset):
             "input_ids": encoded["input_ids"].squeeze(0),
             "attention_mask": encoded["attention_mask"].squeeze(0),
             "image": self._load_image(str(row[self.config.train.image_column])),
-            "tabular": torch.tensor(
-                row[self.tabular_columns].to_numpy(dtype=np.float32), dtype=torch.float32
-            ),
+            "tabular": torch.tensor(self._build_tabular(row), dtype=torch.float32),
             "target": torch.tensor(float(row[self.config.train.target_column]), dtype=torch.float32),
         }
         return item
+
+    def _build_tabular(self, row: pd.Series) -> np.ndarray:
+        vector = row[self.tabular_columns].to_numpy(dtype=np.float32)
+        if self.tabular_weights is None:
+            return vector
+        if vector.shape[0] != self.tabular_weights.shape[0]:
+            raise ValueError("tabular_weights 维度与 tabular_columns 不一致。")
+        return vector * self.tabular_weights

@@ -19,7 +19,8 @@ from .config import AICTConfig
 from .dataset import AICTDataset, prepare_splits
 from .explain import export_shap_report, fit_tabular_surrogate
 from .model import MultiModalEvaluator
-from .weights import combine_gra_cv_weights
+from .report import summarize_attention, write_diagnostic_report
+from .weights import combine_gra_cv_weights, estimate_gra_cv_alpha
 
 
 def load_config(config_path: str | None) -> AICTConfig:
@@ -124,13 +125,30 @@ def main() -> None:
 
     data_frame = pd.read_csv(args.data)
     splits = prepare_splits(data_frame, config)
+    indicator_alpha = float(config.train.indicator_weight_alpha)
+    if config.train.auto_indicator_weight_alpha:
+        indicator_alpha = estimate_gra_cv_alpha(
+            splits.train_df[splits.tabular_columns].to_numpy(),
+            splits.train_df[config.train.target_column].to_numpy(),
+        )
     indicator_weights = combine_gra_cv_weights(
         splits.train_df[splits.tabular_columns].to_numpy(),
         splits.train_df[config.train.target_column].to_numpy(),
+        alpha=indicator_alpha,
     )
 
-    train_dataset = AICTDataset(splits.train_df, config, splits.tabular_columns)
-    val_dataset = AICTDataset(splits.val_df, config, splits.tabular_columns)
+    train_dataset = AICTDataset(
+        splits.train_df,
+        config,
+        splits.tabular_columns,
+        tabular_weights=indicator_weights,
+    )
+    val_dataset = AICTDataset(
+        splits.val_df,
+        config,
+        splits.tabular_columns,
+        tabular_weights=indicator_weights,
+    )
     train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False)
 
@@ -173,6 +191,17 @@ def main() -> None:
         splits.tabular_columns,
         str(Path(config.train.output_dir) / "shap_feature_importance.csv"),
     )
+    if config.report.enabled:
+        attention_summary = summarize_attention(model, val_loader, device)
+        write_diagnostic_report(
+            config=config,
+            metrics=best_metrics,
+            tabular_columns=splits.tabular_columns,
+            indicator_weights=indicator_weights,
+            indicator_alpha=indicator_alpha,
+            attention_summary=attention_summary,
+            shap_path=Path(config.train.output_dir) / "shap_feature_importance.csv",
+        )
 
 
 if __name__ == "__main__":

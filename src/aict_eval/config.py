@@ -11,6 +11,9 @@ class ModelConfig:
     tabular_hidden_size: int = 64
     fusion_hidden_size: int = 256
     num_attention_heads: int = 4
+    fusion_layers: int = 2
+    fusion_ffn_size: int = 512
+    use_modality_gating: bool = True
     dropout: float = 0.1
     max_text_length: int = 256
     local_text_vocab_size: int = 4096
@@ -30,6 +33,20 @@ class TrainConfig:
     text_column: str = "review_text"
     output_dir: str = "outputs"
     device: Optional[str] = None
+    indicator_weight_alpha: float = 0.5
+    auto_indicator_weight_alpha: bool = True
+    scene_column: Optional[str] = None
+    scene_alpha_map: dict[str, float] = field(default_factory=dict)
+    denoise_enabled: bool = False
+    denoise_method: str = "kalman"
+    denoise_group_column: Optional[str] = None
+    denoise_sort_column: Optional[str] = None
+    kalman_process_variance: float = 1e-4
+    kalman_measurement_variance: float = 1e-2
+    ema_alpha: float = 0.25
+    ema_min_alpha: float = 0.05
+    ema_max_alpha: float = 0.6
+    ema_window: int = 5
 
 
 @dataclass
@@ -39,7 +56,15 @@ class ExplainConfig:
 
 
 @dataclass
+class ReportConfig:
+    enabled: bool = True
+    top_k_features: int = 12
+    write_markdown: bool = True
+
+
+@dataclass
 class AICTConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     explain: ExplainConfig = field(default_factory=ExplainConfig)
+    report: ReportConfig = field(default_factory=ReportConfig)

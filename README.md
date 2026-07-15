@@ -1,10 +1,11 @@
 # AICT: AI+文旅应用成效智能评价算法原型
 
-这个原型围绕课题“基于多模态数据融合的 AI+文旅应用成效智能评价模型研究”实现了三类核心算法：
+这个原型围绕课题“基于多模态数据融合的 AI+文旅应用成效智能评价模型研究”实现了以下核心能力：
 
 1. 指标筛选与赋权：`GRA + CV`
-2. 多模态成效评价：`中文文本编码 + 图像编码 + 结构化指标融合`
-3. 可解释性分析：`SHAP`
+2. 结构化指标去噪：`卡尔曼滤波 / 自适应 EMA（可选）`
+3. 多模态成效评价：`中文文本编码 + 图像编码 + 结构化指标融合（跨模态注意力 + 动态门控）`
+4. 可解释性分析与诊断报告：`SHAP + 成效诊断报告（JSON/Markdown）`
 
 ## 目录结构
 
@@ -16,8 +17,10 @@ AICT/
 └─ src/aict_eval/
    ├─ config.py
    ├─ dataset.py
+   ├─ filters.py
    ├─ explain.py
    ├─ model.py
+   ├─ report.py
    ├─ train.py
    └─ weights.py
 ```
@@ -35,7 +38,7 @@ AICT/
 - 文本模态：`bert-base-chinese`
 - 图像模态：`torchvision` 预训练 `ResNet18`
 - 结构化模态：游客停留时长、互动次数、技术效能、文化传播等数值指标
-- 融合方式：将三类特征投影到同一隐空间后，通过 `MultiheadAttention` 做跨模态融合，再进行回归输出
+- 融合方式：将三类特征投影到同一隐空间后，通过多层跨模态注意力做特征对齐，并使用动态门控对模态权重进行自适应调整，再进行回归输出
 - 支持在线下载预训练模型；若下载失败，则自动回退到轻量哈希分词器和本地文本编码器，保证算法在无外网环境也能运行
 
 ### 3. 可解释性
@@ -43,6 +46,11 @@ AICT/
 - 训练完成后，基于结构化指标拟合一个代理模型
 - 使用 `SHAP` 输出影响成效分值的关键指标排序
 - 适合直接转成课题报告中的“影响因子分析”和“优化建议”
+
+### 4. 结构化指标去噪（可选）
+
+- 支持对结构化数值指标进行去噪预处理（卡尔曼滤波 / 自适应 EMA）
+- 可通过配置启用；并可选按 `group_column + sort_column` 做“同一对象的时序去噪”
 
 ## 安装依赖
 
@@ -69,6 +77,15 @@ python -m src.aict_eval.train --data examples/demo_dataset.csv --config configs/
 
 当前默认配置已启用在线下载；如果当前环境无法访问外网，代码会自动走离线回退模式，不阻塞训练。需要强制关闭在线下载时，将 `configs/default.yaml` 中的 `allow_online_model_download` 改为 `false`。
 
+可选能力可在 `configs/default.yaml` 中开启，例如：
+
+```yaml
+train:
+  denoise_enabled: true
+  denoise_method: "kalman"  # 或 "adaptive_ema"
+  auto_indicator_weight_alpha: true
+```
+
 ## 真实课题数据替换方式
 
 将真实数据整理成 CSV，并至少包含以下字段：
@@ -92,6 +109,8 @@ python -m src.aict_eval.train --data examples/demo_dataset.csv --config configs/
 - `indicator_weights.json`：GRA+CV 指标权重
 - `metrics.json`：验证指标
 - `shap_feature_importance.csv`：SHAP 重要性排序
+- `report.json`：成效诊断报告（指标权重、SHAP 关键特征、跨模态注意力统计、去噪配置等）
+- `report.md`：成效诊断报告（便于直接粘贴到课题材料）
 
 ## 适合下一步扩展的方向
 

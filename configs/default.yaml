@@ -4,6 +4,9 @@ model:
   text_hidden_size: 768
   fusion_hidden_size: 256
   num_attention_heads: 4
+  fusion_layers: 2
+  fusion_ffn_size: 512
+  use_modality_gating: true
   dropout: 0.1
   allow_online_model_download: true
 
@@ -18,7 +21,22 @@ train:
   image_column: "image_path"
   text_column: "review_text"
   output_dir: "outputs"
+  indicator_weight_alpha: 0.5
+  auto_indicator_weight_alpha: true
+  denoise_enabled: false
+  denoise_method: "kalman"
+  kalman_process_variance: 0.0001
+  kalman_measurement_variance: 0.01
+  ema_alpha: 0.25
+  ema_min_alpha: 0.05
+  ema_max_alpha: 0.6
+  ema_window: 5
 
 explain:
   background_size: 32
   sample_size: 16
+
+report:
+  enabled: true
+  top_k_features: 12
+  write_markdown: true

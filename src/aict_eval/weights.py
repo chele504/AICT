@@ -54,3 +54,29 @@ def combine_gra_cv_weights(
     cv_weights = coefficient_of_variation_weights(features)
     weights = alpha * gra_weights + (1.0 - alpha) * cv_weights
     return weights / (weights.sum() + 1e-8)
+
+
+def estimate_gra_cv_alpha(
+    features: np.ndarray,
+    target: np.ndarray,
+    min_alpha: float = 0.2,
+    max_alpha: float = 0.8,
+) -> float:
+    x = np.asarray(features, dtype=float)
+    y = np.asarray(target, dtype=float).reshape(-1)
+    if x.ndim != 2 or x.shape[0] == 0:
+        return float(np.clip(0.5, min_alpha, max_alpha))
+    y_std = float(np.std(y))
+    if y_std < 1e-8:
+        return float(np.clip(0.5, min_alpha, max_alpha))
+    corrs = []
+    for j in range(x.shape[1]):
+        col = x[:, j]
+        if float(np.std(col)) < 1e-8:
+            continue
+        c = float(np.corrcoef(col, y)[0, 1])
+        if np.isfinite(c):
+            corrs.append(abs(c))
+    score = float(np.mean(corrs)) if corrs else 0.0
+    alpha = float(min_alpha + (max_alpha - min_alpha) * np.clip(score, 0.0, 1.0))
+    return float(np.clip(alpha, min_alpha, max_alpha))
