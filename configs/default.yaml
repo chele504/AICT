@@ -1,0 +1,24 @@
+model:
+  text_model_name: "bert-base-chinese"
+  image_model_name: "resnet18"
+  text_hidden_size: 768
+  fusion_hidden_size: 256
+  num_attention_heads: 4
+  dropout: 0.1
+  allow_online_model_download: true
+
+train:
+  batch_size: 4
+  epochs: 3
+  learning_rate: 0.0002
+  weight_decay: 0.0001
+  val_ratio: 0.2
+  random_seed: 42
+  target_column: "target_score"
+  image_column: "image_path"
+  text_column: "review_text"
+  output_dir: "outputs"
+
+explain:
+  background_size: 32
+  sample_size: 16
