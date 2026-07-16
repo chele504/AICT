@@ -53,6 +53,7 @@ def summarize_attention(
     device: torch.device,
 ) -> dict:
     model.eval()
+    modality_names = list(model.modality_names)
     gate_sum = None
     gate_count = 0
     attn_sums: list[dict[str, np.ndarray]] = []
@@ -64,6 +65,7 @@ def summarize_attention(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             image=batch["image"],
+            audio=batch["audio"],
             tabular=batch["tabular"],
             return_attention=True,
         )
@@ -77,12 +79,15 @@ def summarize_attention(
 
         attentions = info.get("attentions") or []
         if not attn_sums:
-            attn_sums = [{"text": np.zeros(3), "image": np.zeros(3), "tabular": np.zeros(3)} for _ in attentions]
+            attn_sums = [
+                {name: np.zeros(len(modality_names), dtype=float) for name in modality_names}
+                for _ in attentions
+            ]
 
         for layer_idx, layer_attn in enumerate(attentions):
             if layer_attn is None:
                 continue
-            for key in ("text", "image", "tabular"):
+            for key in modality_names:
                 raw = layer_attn[key]
                 w = raw.mean(dim=(1, 2)).detach().cpu().numpy()
                 attn_sums[layer_idx][key] += w.sum(axis=0)
@@ -91,33 +96,19 @@ def summarize_attention(
     out: dict = {}
     if gate_sum is not None and gate_count > 0:
         out["modality_gates_mean"] = {
-            "text": float(gate_sum[0] / gate_count),
-            "image": float(gate_sum[1] / gate_count),
-            "tabular": float(gate_sum[2] / gate_count),
+            name: float(gate_sum[idx] / gate_count) for idx, name in enumerate(modality_names)
         }
 
     if attn_sums and attn_count > 0:
         layers = []
         for layer in attn_sums:
-            layers.append(
-                {
-                    "text_query": {
-                        "to_text": float(layer["text"][0] / attn_count),
-                        "to_image": float(layer["text"][1] / attn_count),
-                        "to_tabular": float(layer["text"][2] / attn_count),
-                    },
-                    "image_query": {
-                        "to_text": float(layer["image"][0] / attn_count),
-                        "to_image": float(layer["image"][1] / attn_count),
-                        "to_tabular": float(layer["image"][2] / attn_count),
-                    },
-                    "tabular_query": {
-                        "to_text": float(layer["tabular"][0] / attn_count),
-                        "to_image": float(layer["tabular"][1] / attn_count),
-                        "to_tabular": float(layer["tabular"][2] / attn_count),
-                    },
+            query_summary = {}
+            for query_name in modality_names:
+                query_summary[f"{query_name}_query"] = {
+                    f"to_{target_name}": float(layer[query_name][target_idx] / attn_count)
+                    for target_idx, target_name in enumerate(modality_names)
                 }
-            )
+            layers.append(query_summary)
         out["cross_attention_mean"] = layers
     return out
 
@@ -196,10 +187,8 @@ def write_diagnostic_report(
             gates = attention_summary.get("modality_gates_mean")
             if gates:
                 lines.append("- 动态模态权重（均值）")
-                lines.append(
-                    f"  - text={gates.get('text'):.4f} image={gates.get('image'):.4f} tabular={gates.get('tabular'):.4f}"
-                )
+                gate_text = " ".join(f"{name}={value:.4f}" for name, value in gates.items())
+                lines.append(f"  - {gate_text}")
         md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     return report
-

@@ -9,6 +9,10 @@ model:
   use_modality_gating: true
   dropout: 0.1
   allow_online_model_download: true
+  audio_sample_rate: 16000
+  audio_duration_seconds: 2.0
+  audio_n_fft: 400
+  audio_hop_length: 160
 
 train:
   batch_size: 4
@@ -19,6 +23,7 @@ train:
   random_seed: 42
   target_column: "target_score"
   image_column: "image_path"
+  audio_column: "audio_path"
   text_column: "review_text"
   output_dir: "outputs"
   indicator_weight_alpha: 0.5

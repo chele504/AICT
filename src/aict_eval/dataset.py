@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
+import wave
 
 import numpy as np
 import pandas as pd
@@ -74,8 +75,11 @@ def discover_tabular_columns(
     target_column: str,
     text_column: str,
     image_column: str,
+    audio_column: str | None = None,
 ) -> List[str]:
     ignored = {target_column, text_column, image_column}
+    if audio_column:
+        ignored.add(audio_column)
     columns = [
         col for col in df.columns if col not in ignored and pd.api.types.is_numeric_dtype(df[col])
     ]
@@ -85,6 +89,21 @@ def discover_tabular_columns(
 
 
 def prepare_splits(df: pd.DataFrame, config: AICTConfig) -> SplitBundle:
+    required_columns = [
+        config.train.target_column,
+        config.train.text_column,
+        config.train.image_column,
+    ]
+    if config.train.audio_column:
+        required_columns.append(config.train.audio_column)
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            "训练数据缺少必要列: "
+            + ", ".join(missing_columns)
+            + "。若暂不使用语音模态，请将 train.audio_column 设为 null。"
+        )
+
     train_df, val_df = train_test_split(
         df,
         test_size=config.train.val_ratio,
@@ -95,6 +114,7 @@ def prepare_splits(df: pd.DataFrame, config: AICTConfig) -> SplitBundle:
         target_column=config.train.target_column,
         text_column=config.train.text_column,
         image_column=config.train.image_column,
+        audio_column=config.train.audio_column,
     )
     if config.train.denoise_enabled:
         params = DenoiseParams(
@@ -145,6 +165,12 @@ class AICTDataset(Dataset):
             else None
         )
         self.tokenizer = build_tokenizer(config)
+        self.audio_column = config.train.audio_column
+        self.audio_sample_rate = int(config.model.audio_sample_rate)
+        self.audio_num_samples = max(
+            int(config.model.audio_sample_rate * config.model.audio_duration_seconds),
+            1,
+        )
         self.image_transform = transforms.Compose(
             [
                 transforms.Resize((224, 224)),
@@ -163,6 +189,58 @@ class AICTDataset(Dataset):
         image = Image.open(path).convert("RGB")
         return self.image_transform(image)
 
+    def _resample_audio(self, samples: np.ndarray, source_rate: int) -> np.ndarray:
+        if source_rate == self.audio_sample_rate:
+            return samples.astype(np.float32, copy=False)
+        if samples.size == 0:
+            return np.zeros(self.audio_num_samples, dtype=np.float32)
+        target_length = max(int(round(samples.shape[0] * self.audio_sample_rate / source_rate)), 1)
+        source_index = np.arange(samples.shape[0], dtype=np.float32)
+        target_index = np.linspace(0, samples.shape[0] - 1, num=target_length, dtype=np.float32)
+        return np.interp(target_index, source_index, samples).astype(np.float32)
+
+    def _normalize_audio_length(self, samples: np.ndarray) -> np.ndarray:
+        if samples.shape[0] >= self.audio_num_samples:
+            return samples[: self.audio_num_samples]
+        padded = np.zeros(self.audio_num_samples, dtype=np.float32)
+        padded[: samples.shape[0]] = samples
+        return padded
+
+    def _load_audio(self, audio_path: str | None) -> torch.Tensor:
+        if not self.audio_column:
+            return torch.zeros(self.audio_num_samples, dtype=torch.float32)
+        if audio_path is None or not str(audio_path).strip():
+            raise ValueError(f"音频列 {self.audio_column} 存在空值，无法构建语音模态输入。")
+
+        path = Path(audio_path)
+        if not path.exists():
+            raise FileNotFoundError(f"找不到音频文件: {audio_path}")
+        if path.suffix.lower() != ".wav":
+            raise ValueError(f"当前仅支持 WAV 音频文件: {audio_path}")
+
+        with wave.open(str(path), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            sample_rate = wav_file.getframerate()
+            frame_count = wav_file.getnframes()
+            frames = wav_file.readframes(frame_count)
+
+        if sample_width == 1:
+            audio = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+            audio = (audio - 128.0) / 128.0
+        elif sample_width == 2:
+            audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+        elif sample_width == 4:
+            audio = np.frombuffer(frames, dtype=np.int32).astype(np.float32) / 2147483648.0
+        else:
+            raise ValueError(f"暂不支持 {sample_width * 8} bit 的 WAV 音频: {audio_path}")
+
+        if channels > 1:
+            audio = audio.reshape(-1, channels).mean(axis=1)
+        audio = self._resample_audio(audio, sample_rate)
+        audio = self._normalize_audio_length(audio)
+        return torch.tensor(audio, dtype=torch.float32)
+
     def __getitem__(self, idx: int) -> dict:
         row = self.df.iloc[idx]
         text = str(row[self.config.train.text_column])
@@ -177,6 +255,7 @@ class AICTDataset(Dataset):
             "input_ids": encoded["input_ids"].squeeze(0),
             "attention_mask": encoded["attention_mask"].squeeze(0),
             "image": self._load_image(str(row[self.config.train.image_column])),
+            "audio": self._load_audio(row[self.audio_column] if self.audio_column else None),
             "tabular": torch.tensor(self._build_tabular(row), dtype=torch.float32),
             "target": torch.tensor(float(row[self.config.train.target_column]), dtype=torch.float32),
         }

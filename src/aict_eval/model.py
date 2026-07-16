@@ -29,25 +29,20 @@ class CrossModalBlock(nn.Module):
         num_heads: int,
         ffn_size: int,
         dropout: float,
+        modality_names: list[str],
     ) -> None:
         super().__init__()
-        self.attn_text = nn.MultiheadAttention(
-            embed_dim=hidden_size,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.attn_image = nn.MultiheadAttention(
-            embed_dim=hidden_size,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.attn_tabular = nn.MultiheadAttention(
-            embed_dim=hidden_size,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True,
+        self.modality_names = list(modality_names)
+        self.attn_layers = nn.ModuleDict(
+            {
+                name: nn.MultiheadAttention(
+                    embed_dim=hidden_size,
+                    num_heads=num_heads,
+                    dropout=dropout,
+                    batch_first=True,
+                )
+                for name in self.modality_names
+            }
         )
         self.dropout = nn.Dropout(dropout)
         self.norm_attn = nn.LayerNorm(hidden_size)
@@ -61,47 +56,75 @@ class CrossModalBlock(nn.Module):
 
     def forward(self, tokens: torch.Tensor, return_attention: bool = False):
         normed = self.norm_attn(tokens)
-        text_out, text_attn = self.attn_text(
-            normed[:, 0:1, :],
-            normed,
-            normed,
-            need_weights=return_attention,
-            average_attn_weights=False,
-        )
-        image_out, image_attn = self.attn_image(
-            normed[:, 1:2, :],
-            normed,
-            normed,
-            need_weights=return_attention,
-            average_attn_weights=False,
-        )
-        tab_out, tab_attn = self.attn_tabular(
-            normed[:, 2:3, :],
-            normed,
-            normed,
-            need_weights=return_attention,
-            average_attn_weights=False,
-        )
-        attended = torch.cat([text_out, image_out, tab_out], dim=1)
+        outputs = []
+        attentions = {}
+        for idx, name in enumerate(self.modality_names):
+            out, attn = self.attn_layers[name](
+                normed[:, idx : idx + 1, :],
+                normed,
+                normed,
+                need_weights=return_attention,
+                average_attn_weights=False,
+            )
+            outputs.append(out)
+            if return_attention:
+                attentions[name] = attn
+        attended = torch.cat(outputs, dim=1)
         tokens = tokens + self.dropout(attended)
         ffn_out = self.ffn(self.norm_ffn(tokens))
         tokens = tokens + self.dropout(ffn_out)
         if not return_attention:
             return tokens, None
-        return (
-            tokens,
-            {
-                "text": text_attn,
-                "image": image_attn,
-                "tabular": tab_attn,
-            },
+        return tokens, attentions
+
+
+class AudioEncoder(nn.Module):
+    def __init__(self, config: AICTConfig) -> None:
+        super().__init__()
+        self.n_fft = int(config.model.audio_n_fft)
+        self.hop_length = int(config.model.audio_hop_length)
+        stats_dim = (self.n_fft // 2 + 1) * 2
+        self.projector = nn.Sequential(
+            nn.Linear(stats_dim, config.model.audio_hidden_size),
+            nn.ReLU(),
+            nn.LayerNorm(config.model.audio_hidden_size),
+            nn.Dropout(config.model.dropout),
+            nn.Linear(config.model.audio_hidden_size, config.model.fusion_hidden_size),
+            nn.ReLU(),
+            nn.Dropout(config.model.dropout),
         )
+
+    def forward(self, waveform: torch.Tensor) -> torch.Tensor:
+        if waveform.dim() == 1:
+            waveform = waveform.unsqueeze(0)
+        window = torch.hann_window(self.n_fft, device=waveform.device)
+        spectrum = torch.stft(
+            waveform,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=window,
+            return_complex=True,
+        )
+        magnitude = torch.log1p(spectrum.abs())
+        stats = torch.cat(
+            [
+                magnitude.mean(dim=-1),
+                magnitude.std(dim=-1),
+            ],
+            dim=-1,
+        )
+        return self.projector(stats)
 
 
 class MultiModalEvaluator(nn.Module):
     def __init__(self, config: AICTConfig, tabular_dim: int) -> None:
         super().__init__()
         self.config = config
+        self.use_audio = bool(config.train.audio_column)
+        self.modality_names = ["text", "image"]
+        if self.use_audio:
+            self.modality_names.append("audio")
+        self.modality_names.append("tabular")
 
         self.use_transformer_text = True
         try:
@@ -138,6 +161,7 @@ class MultiModalEvaluator(nn.Module):
             nn.ReLU(),
             nn.Dropout(config.model.dropout),
         )
+        self.audio_encoder = AudioEncoder(config) if self.use_audio else None
 
         self.tabular_projector = nn.Sequential(
             nn.Linear(tabular_dim, config.model.tabular_hidden_size),
@@ -149,10 +173,13 @@ class MultiModalEvaluator(nn.Module):
 
         self.modality_gating = (
             nn.Sequential(
-                nn.Linear(config.model.fusion_hidden_size * 3, config.model.fusion_hidden_size),
+                nn.Linear(
+                    config.model.fusion_hidden_size * len(self.modality_names),
+                    config.model.fusion_hidden_size,
+                ),
                 nn.ReLU(),
                 nn.Dropout(config.model.dropout),
-                nn.Linear(config.model.fusion_hidden_size, 3),
+                nn.Linear(config.model.fusion_hidden_size, len(self.modality_names)),
             )
             if config.model.use_modality_gating
             else None
@@ -164,13 +191,17 @@ class MultiModalEvaluator(nn.Module):
                     num_heads=config.model.num_attention_heads,
                     ffn_size=config.model.fusion_ffn_size,
                     dropout=config.model.dropout,
+                    modality_names=self.modality_names,
                 )
                 for _ in range(max(int(config.model.fusion_layers), 1))
             ]
         )
 
         self.regressor = nn.Sequential(
-            nn.Linear(config.model.fusion_hidden_size * 3, config.model.fusion_hidden_size),
+            nn.Linear(
+                config.model.fusion_hidden_size * len(self.modality_names),
+                config.model.fusion_hidden_size,
+            ),
             nn.ReLU(),
             nn.Dropout(config.model.dropout),
             nn.Linear(config.model.fusion_hidden_size, 1),
@@ -181,6 +212,7 @@ class MultiModalEvaluator(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         image: torch.Tensor,
+        audio: torch.Tensor | None,
         tabular: torch.Tensor,
         return_attention: bool = False,
     ) -> torch.Tensor:
@@ -192,9 +224,14 @@ class MultiModalEvaluator(nn.Module):
         text_features = self.text_projector(text_cls)
 
         image_features = self.image_projector(self.image_encoder(image))
+        feature_tokens = [text_features, image_features]
+        if self.use_audio:
+            if audio is None:
+                raise ValueError("当前模型已启用语音模态，但未收到 audio 输入。")
+            feature_tokens.append(self.audio_encoder(audio))
         tabular_features = self.tabular_projector(tabular)
-
-        fusion_tokens = torch.stack([text_features, image_features, tabular_features], dim=1)
+        feature_tokens.append(tabular_features)
+        fusion_tokens = torch.stack(feature_tokens, dim=1)
         gate_weights = None
         if self.modality_gating is not None:
             logits = self.modality_gating(fusion_tokens.reshape(fusion_tokens.size(0), -1))
@@ -211,4 +248,4 @@ class MultiModalEvaluator(nn.Module):
         preds = self.regressor(fused).squeeze(-1)
         if not return_attention:
             return preds
-        return preds, {"gates": gate_weights, "attentions": attentions}
+        return preds, {"gates": gate_weights, "attentions": attentions, "modality_names": self.modality_names}

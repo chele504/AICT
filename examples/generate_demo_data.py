@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
 import random
 from pathlib import Path
+import wave
 
 import numpy as np
 import pandas as pd
@@ -34,11 +36,33 @@ def create_demo_image(path: Path, score: float) -> None:
     image.save(path)
 
 
+def create_demo_audio(path: Path, score: float, sample_rate: int = 16000, seconds: float = 2.0) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    total_samples = max(int(sample_rate * seconds), 1)
+    time_axis = np.linspace(0, seconds, total_samples, endpoint=False, dtype=np.float32)
+    base_freq = 220.0 + score * 180.0
+    modulation_freq = 2.0 + score * 4.0
+    envelope = np.linspace(0.4, 1.0, total_samples, dtype=np.float32)
+    waveform = (
+        0.55 * np.sin(2 * math.pi * base_freq * time_axis)
+        + 0.25 * np.sin(2 * math.pi * (base_freq * 1.5) * time_axis)
+        + 0.10 * np.sin(2 * math.pi * modulation_freq * time_axis) * np.sin(2 * math.pi * base_freq * time_axis)
+    )
+    waveform = np.clip(waveform * envelope, -1.0, 1.0)
+    pcm = (waveform * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm.tobytes())
+
+
 def build_demo_dataset(output_csv: str = "examples/demo_dataset.csv", size: int = 40) -> None:
     random.seed(42)
     np.random.seed(42)
     rows = []
     image_dir = Path("examples/demo_images")
+    audio_dir = Path("examples/demo_audio")
     for idx in range(size):
         cultural_score = np.clip(np.random.normal(0.7, 0.15), 0.1, 1.0)
         engagement_score = np.clip(np.random.normal(0.65, 0.18), 0.1, 1.0)
@@ -53,11 +77,14 @@ def build_demo_dataset(output_csv: str = "examples/demo_dataset.csv", size: int 
             + np.random.normal(0, 0.03)
         )
         image_path = image_dir / f"scene_{idx:03d}.png"
+        audio_path = audio_dir / f"scene_{idx:03d}.wav"
         create_demo_image(image_path, float(target_score))
+        create_demo_audio(audio_path, float(target_score))
         rows.append(
             {
                 "review_text": text,
                 "image_path": str(image_path.resolve()),
+                "audio_path": str(audio_path.resolve()),
                 "tech_empowerment": round(service_efficiency * 100, 2),
                 "visitor_experience": round(engagement_score * 100, 2),
                 "cultural_value": round(cultural_score * 100, 2),

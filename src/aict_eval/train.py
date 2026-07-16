@@ -60,6 +60,7 @@ def train_epoch(model, loader, optimizer, criterion, device):
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             image=batch["image"],
+            audio=batch["audio"],
             tabular=batch["tabular"],
         )
         loss = criterion(preds, batch["target"])
@@ -81,6 +82,7 @@ def evaluate(model, loader, criterion, device):
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             image=batch["image"],
+            audio=batch["audio"],
             tabular=batch["tabular"],
         )
         loss = criterion(preds, batch["target"])

@@ -8,6 +8,7 @@ class ModelConfig:
     image_model_name: str = "resnet18"
     text_hidden_size: int = 768
     image_hidden_size: int = 512
+    audio_hidden_size: int = 256
     tabular_hidden_size: int = 64
     fusion_hidden_size: int = 256
     num_attention_heads: int = 4
@@ -18,6 +19,10 @@ class ModelConfig:
     max_text_length: int = 256
     local_text_vocab_size: int = 4096
     allow_online_model_download: bool = False
+    audio_sample_rate: int = 16000
+    audio_duration_seconds: float = 2.0
+    audio_n_fft: int = 400
+    audio_hop_length: int = 160
 
 
 @dataclass
@@ -30,6 +35,7 @@ class TrainConfig:
     random_seed: int = 42
     target_column: str = "target_score"
     image_column: str = "image_path"
+    audio_column: Optional[str] = None
     text_column: str = "review_text"
     output_dir: str = "outputs"
     device: Optional[str] = None
