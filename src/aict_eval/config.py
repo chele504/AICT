@@ -6,6 +6,8 @@ from typing import Optional
 class ModelConfig:
     text_model_name: str = "bert-base-chinese"
     image_model_name: str = "resnet18"
+    audio_backbone_type: str = "stats"
+    audio_model_name: str = "facebook/wav2vec2-base-960h"
     text_hidden_size: int = 768
     image_hidden_size: int = 512
     audio_hidden_size: int = 256
@@ -31,6 +33,7 @@ class TrainConfig:
     epochs: int = 5
     learning_rate: float = 2e-4
     weight_decay: float = 1e-4
+    max_grad_norm: Optional[float] = 1.0
     val_ratio: float = 0.2
     random_seed: int = 42
     target_column: str = "target_score"
@@ -53,6 +56,17 @@ class TrainConfig:
     ema_min_alpha: float = 0.05
     ema_max_alpha: float = 0.6
     ema_window: int = 5
+    dataloader_num_workers: int = 0
+    dataloader_pin_memory: bool = True
+    dataloader_persistent_workers: bool = True
+    dataloader_prefetch_factor: Optional[int] = 2
+    cache_preprocessed_inputs: bool = True
+    mixed_precision: bool = True
+    early_stopping_patience: int = 3
+    early_stopping_min_delta: float = 0.0
+    freeze_text_encoder: bool = False
+    freeze_image_encoder: bool = False
+    freeze_audio_encoder: bool = False
 
 
 @dataclass
@@ -66,6 +80,7 @@ class ReportConfig:
     enabled: bool = True
     top_k_features: int = 12
     write_markdown: bool = True
+    attention_summary_max_batches: int = 8
 
 
 @dataclass

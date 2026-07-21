@@ -3,7 +3,11 @@ from __future__ import annotations
 import torch
 from torch import nn
 from torchvision.models import ResNet18_Weights, resnet18
-from transformers import AutoModel
+
+try:
+    from transformers import AutoModel
+except Exception:
+    AutoModel = None
 
 from .config import AICTConfig
 
@@ -78,7 +82,7 @@ class CrossModalBlock(nn.Module):
         return tokens, attentions
 
 
-class AudioEncoder(nn.Module):
+class StatsAudioEncoder(nn.Module):
     def __init__(self, config: AICTConfig) -> None:
         super().__init__()
         self.n_fft = int(config.model.audio_n_fft)
@@ -116,6 +120,77 @@ class AudioEncoder(nn.Module):
         return self.projector(stats)
 
 
+class PretrainedAudioEncoder(nn.Module):
+    def __init__(self, config: AICTConfig) -> None:
+        super().__init__()
+        self.backbone_type = config.model.audio_backbone_type.lower()
+        self.use_pretrained = False
+        self.fallback_encoder = StatsAudioEncoder(config)
+        self.backbone = None
+        hidden_size = config.model.audio_hidden_size
+
+        if AutoModel is not None and self.backbone_type != "stats":
+            try:
+                self.backbone = AutoModel.from_pretrained(
+                    config.model.audio_model_name,
+                    local_files_only=not config.model.allow_online_model_download,
+                )
+                self.use_pretrained = True
+                hidden_size = int(
+                    getattr(self.backbone.config, "hidden_size", 0)
+                    or getattr(self.backbone.config, "d_model", 0)
+                    or getattr(self.backbone.config, "classifier_proj_size", 0)
+                    or config.model.audio_hidden_size
+                )
+            except Exception:
+                self.backbone = None
+                self.use_pretrained = False
+
+        self.projector = nn.Sequential(
+            nn.Linear(hidden_size, config.model.audio_hidden_size),
+            nn.ReLU(),
+            nn.LayerNorm(config.model.audio_hidden_size),
+            nn.Dropout(config.model.dropout),
+            nn.Linear(config.model.audio_hidden_size, config.model.fusion_hidden_size),
+            nn.ReLU(),
+            nn.Dropout(config.model.dropout),
+        )
+
+    def _masked_mean_pool(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor | None) -> torch.Tensor:
+        if attention_mask is None:
+            return hidden_states.mean(dim=1)
+        mask = attention_mask.to(hidden_states.device).float()
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(-1)
+        return (hidden_states * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0)
+
+    def forward(self, audio_inputs: dict[str, torch.Tensor]) -> torch.Tensor:
+        waveform = audio_inputs.get("waveform")
+        if waveform is None:
+            raise ValueError("音频输入缺少 waveform，无法执行语音编码。")
+        if not self.use_pretrained or self.backbone is None:
+            return self.fallback_encoder(waveform)
+
+        if self.backbone_type == "whisper":
+            input_features = audio_inputs.get("input_features")
+            if input_features is None:
+                return self.fallback_encoder(waveform)
+            outputs = self.backbone(input_features=input_features)
+            pooled = outputs.last_hidden_state.mean(dim=1)
+            return self.projector(pooled)
+
+        input_values = audio_inputs.get("input_values")
+        if input_values is None:
+            return self.fallback_encoder(waveform)
+        attention_mask = audio_inputs.get("attention_mask")
+        model_kwargs = {"input_values": input_values}
+        if attention_mask is not None:
+            model_kwargs["attention_mask"] = attention_mask
+        outputs = self.backbone(**model_kwargs)
+        pooled = self._masked_mean_pool(outputs.last_hidden_state, attention_mask)
+        return self.projector(pooled)
+
+
 class MultiModalEvaluator(nn.Module):
     def __init__(self, config: AICTConfig, tabular_dim: int) -> None:
         super().__init__()
@@ -127,18 +202,26 @@ class MultiModalEvaluator(nn.Module):
         self.modality_names.append("tabular")
 
         self.use_transformer_text = True
-        try:
-            self.text_encoder = AutoModel.from_pretrained(
-                config.model.text_model_name,
-                local_files_only=not config.model.allow_online_model_download,
-            )
-        except Exception:
+        if AutoModel is None:
             self.use_transformer_text = False
             self.text_encoder = LocalTextEncoder(
                 vocab_size=config.model.local_text_vocab_size,
                 hidden_size=config.model.text_hidden_size,
                 dropout=config.model.dropout,
             )
+        else:
+            try:
+                self.text_encoder = AutoModel.from_pretrained(
+                    config.model.text_model_name,
+                    local_files_only=not config.model.allow_online_model_download,
+                )
+            except Exception:
+                self.use_transformer_text = False
+                self.text_encoder = LocalTextEncoder(
+                    vocab_size=config.model.local_text_vocab_size,
+                    hidden_size=config.model.text_hidden_size,
+                    dropout=config.model.dropout,
+                )
         self.text_projector = nn.Sequential(
             nn.Linear(config.model.text_hidden_size, config.model.fusion_hidden_size),
             nn.ReLU(),
@@ -161,7 +244,7 @@ class MultiModalEvaluator(nn.Module):
             nn.ReLU(),
             nn.Dropout(config.model.dropout),
         )
-        self.audio_encoder = AudioEncoder(config) if self.use_audio else None
+        self.audio_encoder = PretrainedAudioEncoder(config) if self.use_audio else None
 
         self.tabular_projector = nn.Sequential(
             nn.Linear(tabular_dim, config.model.tabular_hidden_size),
@@ -212,7 +295,7 @@ class MultiModalEvaluator(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         image: torch.Tensor,
-        audio: torch.Tensor | None,
+        audio_inputs: dict[str, torch.Tensor] | None,
         tabular: torch.Tensor,
         return_attention: bool = False,
     ) -> torch.Tensor:
@@ -226,9 +309,9 @@ class MultiModalEvaluator(nn.Module):
         image_features = self.image_projector(self.image_encoder(image))
         feature_tokens = [text_features, image_features]
         if self.use_audio:
-            if audio is None:
-                raise ValueError("当前模型已启用语音模态，但未收到 audio 输入。")
-            feature_tokens.append(self.audio_encoder(audio))
+            if audio_inputs is None:
+                raise ValueError("当前模型已启用语音模态，但未收到 audio_inputs 输入。")
+            feature_tokens.append(self.audio_encoder(audio_inputs))
         tabular_features = self.tabular_projector(tabular)
         feature_tokens.append(tabular_features)
         fusion_tokens = torch.stack(feature_tokens, dim=1)

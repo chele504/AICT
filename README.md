@@ -37,7 +37,7 @@ AICT/
 
 - 文本模态：`bert-base-chinese`
 - 图像模态：`torchvision` 预训练 `ResNet18`
-- 语音模态：`WAV` 波形经频谱统计编码后映射到统一融合空间
+- 语音模态：支持 `wav2vec2 / HuBERT / Whisper encoder` 预训练 backbone，并在离线或依赖不可用时自动回退到轻量频谱统计编码
 - 结构化模态：游客停留时长、互动次数、技术效能、文化传播等数值指标
 - 融合方式：将文本、图像、语音、结构化特征投影到同一隐空间后，通过多层跨模态注意力做特征对齐，并使用动态门控对模态权重进行自适应调整，再进行回归输出
 - 支持在线下载预训练模型；若下载失败，则自动回退到轻量哈希分词器和本地文本编码器，保证算法在无外网环境也能运行
@@ -75,16 +75,49 @@ python -m src.aict_eval.train --data examples/demo_dataset.csv --config configs/
 
 - `bert-base-chinese`
 - `ResNet18` 官方预训练参数
+- 语音 backbone（如 `facebook/wav2vec2-base-960h`）
 
 当前默认配置已启用在线下载；如果当前环境无法访问外网，代码会自动走离线回退模式，不阻塞训练。需要强制关闭在线下载时，将 `configs/default.yaml` 中的 `allow_online_model_download` 改为 `false`。
 
 可选能力可在 `configs/default.yaml` 中开启，例如：
 
 ```yaml
+model:
+  audio_backbone_type: "wav2vec2"  # 可选: stats / wav2vec2 / hubert / whisper
+  audio_model_name: "facebook/wav2vec2-base-960h"
+
 train:
   denoise_enabled: true
   denoise_method: "kalman"  # 或 "adaptive_ema"
   auto_indicator_weight_alpha: true
+  mixed_precision: true
+  early_stopping_patience: 3
+  cache_preprocessed_inputs: true
+  freeze_audio_encoder: false
+```
+
+如果需要强制关闭预训练语音模型并退回轻量统计编码，可将：
+
+```yaml
+model:
+  audio_backbone_type: "stats"
+```
+
+其中：
+
+- `wav2vec2` / `hubert`：输入原始波形，适合通用语音表征提取
+- `whisper`：输入特征谱图，适合更强的预训练编码路线
+- `stats`：回退到当前项目内置的 `STFT + 统计量 + MLP` 轻量语音编码
+
+若训练数据量较大，可进一步调整以下性能参数：
+
+```yaml
+train:
+  dataloader_num_workers: 2
+  dataloader_pin_memory: true
+  dataloader_persistent_workers: true
+  freeze_text_encoder: false
+  freeze_image_encoder: false
 ```
 
 ## 真实课题数据替换方式
@@ -110,11 +143,20 @@ train:
 - `multimodal_evaluator.pt`：模型权重
 - `indicator_weights.json`：GRA+CV 指标权重
 - `metrics.json`：验证指标
+- `preprocess_artifacts.json`：结构化特征列及标准化参数，用于独立推理复现
 - `shap_feature_importance.csv`：SHAP 重要性排序
 - `report.json`：成效诊断报告（指标权重、SHAP 关键特征、跨模态注意力统计、去噪配置等）
 - `report.md`：成效诊断报告（便于直接粘贴到课题材料）
 
 如需兼容旧版无语音数据集，可将 `configs/default.yaml` 中的 `train.audio_column` 设为 `null`，模型会自动退回文本 + 图像 + 结构化三模态。
+
+## 独立推理
+
+训练完成后，可直接加载 `outputs/` 中保存的权重和预处理工件，对新的 CSV 数据做批量预测：
+
+```bash
+python -m src.aict_eval.infer --data examples/demo_dataset.csv --config configs/default.yaml --model-dir outputs --output outputs/predictions.csv
+```
 
 ## 适合下一步扩展的方向
 

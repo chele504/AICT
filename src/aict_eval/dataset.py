@@ -13,7 +13,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
 from torchvision import transforms
-from transformers import AutoTokenizer
+
+try:
+    from transformers import AutoTokenizer
+except Exception:
+    AutoTokenizer = None
+
+try:
+    from transformers import AutoFeatureExtractor
+except Exception:
+    AutoFeatureExtractor = None
 
 from .config import AICTConfig
 from .filters import DenoiseParams, denoise_dataframe
@@ -58,6 +67,11 @@ class HashTokenizer:
 
 
 def build_tokenizer(config: AICTConfig):
+    if AutoTokenizer is None:
+        return HashTokenizer(
+            vocab_size=config.model.local_text_vocab_size,
+            max_length=config.model.max_text_length,
+        )
     try:
         return AutoTokenizer.from_pretrained(
             config.model.text_model_name,
@@ -68,6 +82,22 @@ def build_tokenizer(config: AICTConfig):
             vocab_size=config.model.local_text_vocab_size,
             max_length=config.model.max_text_length,
         )
+
+
+def build_audio_feature_extractor(config: AICTConfig):
+    if not config.train.audio_column:
+        return None
+    if config.model.audio_backbone_type.lower() == "stats":
+        return None
+    if AutoFeatureExtractor is None:
+        return None
+    try:
+        return AutoFeatureExtractor.from_pretrained(
+            config.model.audio_model_name,
+            local_files_only=not config.model.allow_online_model_download,
+        )
+    except Exception:
+        return None
 
 
 def discover_tabular_columns(
@@ -171,6 +201,13 @@ class AICTDataset(Dataset):
             int(config.model.audio_sample_rate * config.model.audio_duration_seconds),
             1,
         )
+        self.audio_backbone_type = config.model.audio_backbone_type.lower()
+        self.audio_feature_extractor = build_audio_feature_extractor(config)
+        self.use_pretrained_audio = self.audio_feature_extractor is not None
+        self.cache_preprocessed_inputs = bool(config.train.cache_preprocessed_inputs)
+        self._text_cache: dict[str, dict[str, torch.Tensor]] = {}
+        self._image_cache: dict[str, torch.Tensor] = {}
+        self._audio_cache: dict[str, dict[str, torch.Tensor]] = {}
         self.image_transform = transforms.Compose(
             [
                 transforms.Resize((224, 224)),
@@ -183,11 +220,16 @@ class AICTDataset(Dataset):
         return len(self.df)
 
     def _load_image(self, image_path: str) -> torch.Tensor:
+        if self.cache_preprocessed_inputs and image_path in self._image_cache:
+            return self._image_cache[image_path].clone()
         path = Path(image_path)
         if not path.exists():
             raise FileNotFoundError(f"找不到图像文件: {image_path}")
-        image = Image.open(path).convert("RGB")
-        return self.image_transform(image)
+        with Image.open(path) as image:
+            image_tensor = self.image_transform(image.convert("RGB"))
+        if self.cache_preprocessed_inputs:
+            self._image_cache[image_path] = image_tensor
+        return image_tensor.clone() if self.cache_preprocessed_inputs else image_tensor
 
     def _resample_audio(self, samples: np.ndarray, source_rate: int) -> np.ndarray:
         if source_rate == self.audio_sample_rate:
@@ -206,17 +248,58 @@ class AICTDataset(Dataset):
         padded[: samples.shape[0]] = samples
         return padded
 
-    def _load_audio(self, audio_path: str | None) -> torch.Tensor:
-        if not self.audio_column:
-            return torch.zeros(self.audio_num_samples, dtype=torch.float32)
-        if audio_path is None or not str(audio_path).strip():
-            raise ValueError(f"音频列 {self.audio_column} 存在空值，无法构建语音模态输入。")
+    def _clone_audio_inputs(self, audio_inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {key: value.clone() for key, value in audio_inputs.items()}
 
-        path = Path(audio_path)
+    def _build_audio_inputs(self, samples: np.ndarray) -> dict[str, torch.Tensor]:
+        normalized = self._normalize_audio_length(samples.astype(np.float32, copy=False))
+        waveform = torch.tensor(normalized, dtype=torch.float32)
+        if not self.use_pretrained_audio:
+            return {
+                "waveform": waveform,
+                "attention_mask": torch.ones_like(waveform, dtype=torch.long),
+            }
+        extracted = self.audio_feature_extractor(
+            normalized,
+            sampling_rate=self.audio_sample_rate,
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            max_length=self.audio_num_samples,
+            return_attention_mask=True,
+        )
+        audio_inputs: dict[str, torch.Tensor] = {"waveform": waveform}
+        if "input_values" in extracted:
+            audio_inputs["input_values"] = extracted["input_values"].squeeze(0).to(torch.float32)
+        if "input_features" in extracted:
+            audio_inputs["input_features"] = extracted["input_features"].squeeze(0).to(torch.float32)
+        if "attention_mask" in extracted:
+            audio_inputs["attention_mask"] = extracted["attention_mask"].squeeze(0).to(torch.long)
+        elif "input_values" in audio_inputs:
+            audio_inputs["attention_mask"] = torch.ones_like(audio_inputs["input_values"], dtype=torch.long)
+        elif "input_features" in audio_inputs:
+            audio_inputs["attention_mask"] = torch.ones(
+                audio_inputs["input_features"].shape[-1],
+                dtype=torch.long,
+            )
+        else:
+            audio_inputs["attention_mask"] = torch.ones_like(waveform, dtype=torch.long)
+        return audio_inputs
+
+    def _load_audio(self, audio_path: str | None) -> dict[str, torch.Tensor]:
+        if not self.audio_column:
+            return self._build_audio_inputs(np.zeros(self.audio_num_samples, dtype=np.float32))
+        if audio_path is None or not str(audio_path).strip():
+            return self._build_audio_inputs(np.zeros(self.audio_num_samples, dtype=np.float32))
+        audio_key = str(audio_path)
+        if self.cache_preprocessed_inputs and audio_key in self._audio_cache:
+            return self._clone_audio_inputs(self._audio_cache[audio_key])
+
+        path = Path(audio_key)
         if not path.exists():
-            raise FileNotFoundError(f"找不到音频文件: {audio_path}")
+            raise FileNotFoundError(f"找不到音频文件: {audio_key}")
         if path.suffix.lower() != ".wav":
-            raise ValueError(f"当前仅支持 WAV 音频文件: {audio_path}")
+            raise ValueError(f"当前仅支持 WAV 音频文件: {audio_key}")
 
         with wave.open(str(path), "rb") as wav_file:
             channels = wav_file.getnchannels()
@@ -238,12 +321,18 @@ class AICTDataset(Dataset):
         if channels > 1:
             audio = audio.reshape(-1, channels).mean(axis=1)
         audio = self._resample_audio(audio, sample_rate)
-        audio = self._normalize_audio_length(audio)
-        return torch.tensor(audio, dtype=torch.float32)
+        audio_inputs = self._build_audio_inputs(audio)
+        if self.cache_preprocessed_inputs:
+            self._audio_cache[audio_key] = audio_inputs
+        return self._clone_audio_inputs(audio_inputs) if self.cache_preprocessed_inputs else audio_inputs
 
-    def __getitem__(self, idx: int) -> dict:
-        row = self.df.iloc[idx]
-        text = str(row[self.config.train.text_column])
+    def _encode_text(self, text: str) -> dict[str, torch.Tensor]:
+        if self.cache_preprocessed_inputs and text in self._text_cache:
+            cached = self._text_cache[text]
+            return {
+                "input_ids": cached["input_ids"].clone(),
+                "attention_mask": cached["attention_mask"].clone(),
+            }
         encoded = self.tokenizer(
             text,
             max_length=self.config.model.max_text_length,
@@ -251,11 +340,26 @@ class AICTDataset(Dataset):
             truncation=True,
             return_tensors="pt",
         )
-        item = {
+        packed = {
             "input_ids": encoded["input_ids"].squeeze(0),
             "attention_mask": encoded["attention_mask"].squeeze(0),
+        }
+        if self.cache_preprocessed_inputs:
+            self._text_cache[text] = packed
+        return {
+            "input_ids": packed["input_ids"].clone() if self.cache_preprocessed_inputs else packed["input_ids"],
+            "attention_mask": packed["attention_mask"].clone() if self.cache_preprocessed_inputs else packed["attention_mask"],
+        }
+
+    def __getitem__(self, idx: int) -> dict:
+        row = self.df.iloc[idx]
+        text = str(row[self.config.train.text_column])
+        encoded = self._encode_text(text)
+        item = {
+            "input_ids": encoded["input_ids"],
+            "attention_mask": encoded["attention_mask"],
             "image": self._load_image(str(row[self.config.train.image_column])),
-            "audio": self._load_audio(row[self.audio_column] if self.audio_column else None),
+            "audio_inputs": self._load_audio(row[self.audio_column] if self.audio_column else None),
             "tabular": torch.tensor(self._build_tabular(row), dtype=torch.float32),
             "target": torch.tensor(float(row[self.config.train.target_column]), dtype=torch.float32),
         }
