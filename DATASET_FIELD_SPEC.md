@@ -138,6 +138,10 @@ C:\Users\lenovo\Desktop\AICT\examples\demo_audio\scene_000.wav
 - 缺失值要提前处理
 - 同一字段的量纲和单位要统一
 
+> **关于去噪**：结构化指标可启用模型内置去噪（`train.denoise_enabled: true`），支持 6 种算法：`卡尔曼滤波 / 自适应 EMA / 中值滤波 / 移动平均 / Savitzky-Golay 多项式平滑 / Haar 小波软阈值`。若数据是"同一对象在多个时间窗口"的观测序列（如同一景区多天指标），可同时设置 `denoise_group_column`（如对象 ID）+ `denoise_sort_column`（如时间戳），实现分组时序去噪，更符合文旅项目长期监测场景。
+
+> **关于指标赋权**：所有结构化指标会通过 `灰色关联分析 GRA + 变异系数 CV + 皮尔逊相关 + 熵权法` 四源融合自动计算客观权重（`auto_indicator_weight_alpha: true` 时还会做 5×4×4=80 组网格搜索），因此**不需要人工对指标做手动加权**，但建议保证各指标同向化（数值越大越好）并统一量纲。
+
 ## 4. 一条样本应如何对应现实对象
 
 建议采用以下任一组织方式：
@@ -179,6 +183,7 @@ C:\Users\lenovo\Desktop\AICT\examples\demo_audio\scene_000.wav
 - 保留原始反馈文本
 - 尽量避免全是模板化句子
 - 可以记录评论时间、来源平台等辅助信息，但这些字段若为非数值型默认不会进入结构化特征
+- **离线回退机制**：若无法下载 BERT 等预训练模型，代码会自动回退到本地 `HashTokenizer + 双层双向 BiLSTM + 自注意力池化` 的轻量中文编码器，保证在无外网环境也能训练
 
 ### 图像数据
 
@@ -191,12 +196,15 @@ C:\Users\lenovo\Desktop\AICT\examples\demo_audio\scene_000.wav
 - 建议使用清晰可辨的普通话讲解、游客语音反馈或问答音频
 - 当前版本优先支持 `WAV`
 - 建议控制单条音频时长在几秒到几十秒内，后续可按需要进一步升级编码方式
+- **离线回退机制**：若无法下载 wav2vec2/HuBERT/Whisper 预训练模型，代码会自动回退到增强版统计编码（STFT → 64 维梅尔分箱统计 + 谱质心/谱滚降/谱带宽/谱平坦度 + ZCR/RMS/偏度/峰度 等时域特征 → 3 层 MLP 投影），不阻塞训练
 
 ### 结构化数据
 
 - 优先选取与你的四个一级指标相关的量化特征
 - 先做字段统一、单位统一、缺失值清理
 - 如同一对象存在时间序列数据，可后续启用去噪功能
+- **建议按"越大越好"做同向化处理**，便于客观赋权的解释性（GRA/皮尔逊/熵权法对方向不敏感，但可视化报告中"权重高即影响大"的语义更自然）
+- **强烈建议保留 scene_id / timestamp 等辅助列**：用于 `scene_column` 分层抽样 train/val，以及 `denoise_group_column + denoise_sort_column` 做分组时序去噪（即使不是数值列也可以保留在 CSV 中，模型会自动跳过非数值列作为特征）
 
 ### 标签数据
 
@@ -236,6 +244,7 @@ review_text,image_path,audio_path,tech_empowerment,visitor_experience,cultural_v
 - 1 列语音路径
 - 1 列目标分数
 - 至少 1 列数值型结构化指标
+- （推荐）1 列 scene 标签用于 train/val 分层抽样，1 列 timestamp 用于时序去噪（若你有同一对象的时间序列观测）
 
 若暂时没有语音数据，可关闭语音列配置，先使用文本 + 图像 + 结构化三模态。
 
