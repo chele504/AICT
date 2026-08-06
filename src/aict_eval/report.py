@@ -103,7 +103,7 @@ def _ranked_dimension_text(dim_share: dict[str, float]) -> str:
 
 def _build_goal_alignment_summary(dim_share: dict[str, float], attention_summary: dict, shap_top: list[dict]) -> list[str]:
     lines = [
-        "本报告围绕附件2提出的“评价科学化、数据多维化、反馈智能化”总体目标，对“AI+文旅”应用成效开展结构化分析与研究性阐释。",
+        "本报告围绕课题提出的“评价科学化、数据多维化、反馈智能化”总体目标，对“AI+文旅”应用成效开展结构化分析与研究性阐释。",
         "在评价科学化方面，报告依据 GRA+CV 方法对四个一级指标进行客观赋权，并结合实证结果对评价输出的稳定性进行检验。",
     ]
     if attention_summary:
@@ -111,7 +111,7 @@ def _build_goal_alignment_summary(dim_share: dict[str, float], attention_summary
     if shap_top:
         lines.append("在反馈智能化方面，模型不仅输出综合成效分值，同时结合 SHAP 归因结果识别关键驱动因素，为景区运营优化和行业监管决策提供可解释依据。")
     if dim_share:
-        lines.append("报告结构严格对应附件2中提出的四个一级指标，即技术赋能效能、游客感知体验、文化价值传播和经济社会增值。")
+        lines.append("报告结构严格对应课题设定的四个一级指标，即技术赋能效能、游客感知体验、文化价值传播和经济社会增值。")
     return lines
 
 
@@ -207,7 +207,7 @@ def _build_denoise_analysis(config: AICTConfig) -> str:
 
 def _build_framework_analysis(config: AICTConfig) -> list[str]:
     lines = [
-        "本研究遵循附件2提出的“感知-价值”双驱动评价逻辑，将技术效能、游客体验、文化传播和经济社会增值统一纳入同一评价框架。",
+        "本研究遵循课题设定的“感知-价值”双驱动评价逻辑，将技术效能、游客体验、文化传播和经济社会增值统一纳入同一评价框架。",
         "本阶段研究以文本、图像、语音和结构化业务指标作为多模态输入，对游客的认知反馈、行为反馈和价值反馈进行综合建模。",
     ]
     if config.train.audio_column:
@@ -221,7 +221,7 @@ def _build_path_analysis(dim_share: dict[str, float], shap_top: list[dict], atte
     dominant_dimension = max(dim_share.items(), key=lambda x: x[1])[0] if dim_share else "游客感知体验"
     top_features = "、".join(_feature_label(item["feature"]) for item in shap_top[:3]) if shap_top else "关键业务指标"
     lines = [
-        f"结合当前评价结果，后续可沿附件2提出的“技术迭代-场景适配-文化共鸣-产业增值”路径持续推进模型应用，其中现阶段最值得优先关注的维度是“{dominant_dimension}”。",
+        f"结合当前评价结果，后续可沿“技术迭代-场景适配-文化共鸣-产业增值”路径持续推进模型应用，其中现阶段最值得优先关注的维度是“{dominant_dimension}”。",
         f"从关键驱动因素看，{top_features}对成效分值具有较强影响，说明优化路径宜优先聚焦于可持续采集、可持续反馈的核心业务指标。",
     ]
     gates = attention_summary.get("modality_gates_mean") if attention_summary else None

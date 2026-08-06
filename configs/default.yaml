@@ -4,12 +4,19 @@ model:
   audio_backbone_type: "wav2vec2"
   audio_model_name: "facebook/wav2vec2-base-960h"
   text_hidden_size: 768
+  image_hidden_size: 512
+  audio_hidden_size: 256
+  tabular_hidden_size: 128
   fusion_hidden_size: 256
   num_attention_heads: 4
-  fusion_layers: 2
-  fusion_ffn_size: 512
+  fusion_layers: 3
+  fusion_ffn_size: 768
   use_modality_gating: true
+  use_auxiliary_loss: true
+  auxiliary_loss_weight: 0.15
   dropout: 0.1
+  max_text_length: 256
+  local_text_vocab_size: 4096
   allow_online_model_download: true
   audio_sample_rate: 16000
   audio_duration_seconds: 2.0
@@ -18,8 +25,9 @@ model:
 
 train:
   batch_size: 4
-  epochs: 3
+  epochs: 10
   learning_rate: 0.0002
+  backbone_learning_rate: 0.00002
   weight_decay: 0.0001
   max_grad_norm: 1.0
   val_ratio: 0.2
@@ -31,29 +39,49 @@ train:
   output_dir: "outputs"
   indicator_weight_alpha: 0.5
   auto_indicator_weight_alpha: true
+  scene_column: null
+  scene_alpha_map: {}
   denoise_enabled: false
   denoise_method: "kalman"
+  denoise_group_column: null
+  denoise_sort_column: null
   kalman_process_variance: 0.0001
   kalman_measurement_variance: 0.01
   ema_alpha: 0.25
   ema_min_alpha: 0.05
   ema_max_alpha: 0.6
   ema_window: 5
+  wavelet_wavelet: "db4"
+  wavelet_mode: "soft"
+  wavelet_level: 2
+  sg_window_length: 5
+  sg_polyorder: 2
+  median_window: 5
   dataloader_num_workers: 0
   dataloader_pin_memory: true
   dataloader_persistent_workers: true
   dataloader_prefetch_factor: 2
   cache_preprocessed_inputs: true
+  cache_max_size: 10000
   mixed_precision: true
-  early_stopping_patience: 3
-  early_stopping_min_delta: 0.0
+  early_stopping_patience: 5
+  early_stopping_min_delta: 0.0001
   freeze_text_encoder: false
   freeze_image_encoder: false
   freeze_audio_encoder: false
+  gradient_accumulation_steps: 1
+  lr_scheduler_type: "cosine_with_warmup"
+  warmup_epochs: 2
+  warmup_ratio: null
+  min_lr_ratio: 0.05
+  label_smoothing: 0.0
+  loss_type: "huber"
+  huber_delta: 0.5
+  enable_augmentation: true
 
 explain:
-  background_size: 32
-  sample_size: 16
+  background_size: 64
+  sample_size: 32
 
 report:
   enabled: true

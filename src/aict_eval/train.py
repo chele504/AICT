@@ -14,6 +14,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from torch import nn
 from torch.amp import GradScaler
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -76,6 +77,37 @@ def move_batch_to_device(batch, device: torch.device):
     return batch
 
 
+def build_param_groups(model: MultiModalEvaluator, config: AICTConfig):
+    base_lr = float(config.train.learning_rate)
+    backbone_lr = float(config.train.backbone_learning_rate)
+    weight_decay = float(config.train.weight_decay)
+    no_decay = {"bias", "norm", "LayerNorm", "layer_norm", "ln_"}
+
+    def is_backbone(name: str) -> bool:
+        backbone_prefixes = (
+            "text_encoder.",
+            "image_encoder.",
+            "audio_encoder.backbone.",
+        )
+        return name.startswith(backbone_prefixes) and "projector" not in name and "se" not in name
+
+    def get_decay_and_lr(name: str, param):
+        use_wd = not any(nd in name for nd in no_decay) and param.ndim >= 2
+        lr = backbone_lr if is_backbone(name) else base_lr
+        return float(weight_decay) if use_wd else 0.0, lr
+
+    groups = {}
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        wd, lr = get_decay_and_lr(name, param)
+        key = (round(wd, 10), round(lr, 15))
+        if key not in groups:
+            groups[key] = {"params": [], "weight_decay": wd, "lr": lr}
+        groups[key]["params"].append(param)
+    return list(groups.values())
+
+
 def maybe_freeze_backbones(model: MultiModalEvaluator, config: AICTConfig) -> None:
     if config.train.freeze_text_encoder:
         for param in model.text_encoder.parameters():
@@ -90,39 +122,140 @@ def maybe_freeze_backbones(model: MultiModalEvaluator, config: AICTConfig) -> No
                 param.requires_grad = False
 
 
-def train_epoch(model, loader, optimizer, criterion, device, scaler, config: AICTConfig):
+def build_criterion(config: AICTConfig):
+    loss_name = str(config.train.loss_type).lower()
+    delta = float(config.train.huber_delta)
+    if loss_name == "huber":
+        base = nn.HuberLoss(delta=delta)
+    elif loss_name == "mae" or loss_name == "l1":
+        base = nn.L1Loss()
+    else:
+        base = nn.MSELoss()
+    label_smoothing = float(config.train.label_smoothing)
+    aux_weight = float(config.model.auxiliary_loss_weight) if config.model.use_auxiliary_loss else 0.0
+
+    def criterion(preds, target, aux_preds=None):
+        if label_smoothing > 0:
+            target_mean = target.mean()
+            smoothed = target * (1.0 - label_smoothing) + target_mean * label_smoothing
+        else:
+            smoothed = target
+        main_loss = base(preds, smoothed)
+        if aux_preds is None or aux_weight <= 0:
+            return main_loss
+        aux_loss = 0.0
+        count = 0
+        for name, aux_out in aux_preds.items():
+            aux_loss = aux_loss + base(aux_out, smoothed)
+            count += 1
+        if count > 0:
+            aux_loss = aux_loss / count
+        return (1.0 - aux_weight) * main_loss + aux_weight * aux_loss
+
+    return criterion
+
+
+def build_lr_scheduler(optimizer, config: AICTConfig, total_steps_per_epoch: int):
+    total_epochs = int(config.train.epochs)
+    grad_accum = max(int(config.train.gradient_accumulation_steps), 1)
+    total_steps = total_epochs * total_steps_per_epoch // grad_accum
+    scheduler_type = str(config.train.lr_scheduler_type).lower()
+
+    if config.train.warmup_ratio is not None:
+        warmup_steps = max(1, int(total_steps * float(config.train.warmup_ratio)))
+    else:
+        warmup_steps = max(1, int(config.train.warmup_epochs) * total_steps_per_epoch // grad_accum)
+
+    min_lr = float(config.train.learning_rate) * float(config.train.min_lr_ratio)
+
+    if scheduler_type in {"cosine", "cosine_with_warmup"}:
+        cosine_steps = max(total_steps - warmup_steps, 1)
+        cosine = CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=min_lr)
+        if warmup_steps <= 0:
+            return cosine, None
+        warmup = LinearLR(
+            optimizer,
+            start_factor=1e-4 / max(float(config.train.learning_rate), 1e-8),
+            end_factor=1.0,
+            total_iters=warmup_steps,
+        )
+        milestones = [warmup_steps]
+        scheduler = SequentialLR(optimizer, schedulers=[warmup, cosine], milestones=milestones)
+        return scheduler, warmup_steps
+    if scheduler_type == "linear":
+        total = max(total_steps, 1)
+        linear = LinearLR(
+            optimizer,
+            start_factor=1.0,
+            end_factor=float(config.train.min_lr_ratio),
+            total_iters=total,
+        )
+        return linear, None
+    return None, None
+
+
+def train_epoch(
+    model,
+    loader,
+    optimizer,
+    criterion,
+    device,
+    scaler,
+    config: AICTConfig,
+    scheduler=None,
+    scheduler_step_each_batch: bool = True,
+    epoch: int = 0,
+):
     model.train()
     losses = []
     autocast_enabled = bool(config.train.mixed_precision and device.type == "cuda")
-    for batch in tqdm(loader, desc="train", leave=False):
+    grad_accum = max(int(config.train.gradient_accumulation_steps), 1)
+    optimizer.zero_grad(set_to_none=True)
+    pbar = tqdm(loader, desc=f"train epoch={epoch + 1}", leave=False)
+    for step_idx, batch in enumerate(pbar):
         batch = move_batch_to_device(batch, device)
-        optimizer.zero_grad(set_to_none=True)
+        do_backward = (step_idx + 1) % grad_accum == 0 or step_idx + 1 == len(loader)
         with (
             torch.autocast(device_type="cuda", dtype=torch.float16)
             if autocast_enabled
             else nullcontext()
         ):
-            preds = model(
+            outputs = model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
                 image=batch["image"],
                 audio_inputs=batch["audio_inputs"],
                 tabular=batch["tabular"],
             )
-            loss = criterion(preds, batch["target"])
+            if isinstance(outputs, tuple):
+                preds, aux_preds = outputs
+            else:
+                preds = outputs
+                aux_preds = None
+            loss = criterion(preds, batch["target"], aux_preds)
+            loss_to_backward = loss / grad_accum
         if scaler.is_enabled():
-            scaler.scale(loss).backward()
-            if config.train.max_grad_norm is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), float(config.train.max_grad_norm))
-            scaler.step(optimizer)
-            scaler.update()
+            scaler.scale(loss_to_backward).backward()
+            if do_backward:
+                if config.train.max_grad_norm is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(config.train.max_grad_norm))
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                if scheduler is not None and scheduler_step_each_batch:
+                    scheduler.step()
         else:
-            loss.backward()
-            if config.train.max_grad_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), float(config.train.max_grad_norm))
-            optimizer.step()
+            loss_to_backward.backward()
+            if do_backward:
+                if config.train.max_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(config.train.max_grad_norm))
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                if scheduler is not None and scheduler_step_each_batch:
+                    scheduler.step()
         losses.append(loss.item())
+        pbar.set_postfix(loss=f"{loss.item():.4f}")
     return float(np.mean(losses))
 
 
@@ -147,6 +280,8 @@ def evaluate(model, loader, criterion, device, config: AICTConfig):
                 audio_inputs=batch["audio_inputs"],
                 tabular=batch["tabular"],
             )
+            if isinstance(preds, tuple):
+                preds = preds[0]
             loss = criterion(preds, batch["target"])
         losses.append(loss.item())
         all_targets.extend(batch["target"].cpu().numpy().tolist())
@@ -220,35 +355,50 @@ def main() -> None:
         config,
         splits.tabular_columns,
         tabular_weights=indicator_weights,
+        is_train=True,
     )
     val_dataset = AICTDataset(
         splits.val_df,
         config,
         splits.tabular_columns,
         tabular_weights=indicator_weights,
+        is_train=False,
     )
     train_loader = build_dataloader(train_dataset, config, shuffle=True)
     val_loader = build_dataloader(val_dataset, config, shuffle=False)
 
     model = MultiModalEvaluator(config, tabular_dim=len(splits.tabular_columns)).to(device)
     maybe_freeze_backbones(model, config)
-    criterion = nn.MSELoss()
-    optimizer = AdamW(
-        [param for param in model.parameters() if param.requires_grad],
-        lr=config.train.learning_rate,
-        weight_decay=config.train.weight_decay,
-    )
+    criterion = build_criterion(config)
+    param_groups = build_param_groups(model, config)
+    optimizer = AdamW(param_groups)
     scaler = GradScaler("cuda", enabled=bool(config.train.mixed_precision and device.type == "cuda"))
+
+    steps_per_epoch = len(train_loader)
+    scheduler, warmup_steps = build_lr_scheduler(optimizer, config, steps_per_epoch)
 
     best_metrics = None
     best_state = None
     epochs_without_improvement = 0
     for epoch in range(config.train.epochs):
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, scaler, config)
+        train_loss = train_epoch(
+            model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            scaler,
+            config,
+            scheduler=scheduler,
+            scheduler_step_each_batch=True,
+            epoch=epoch,
+        )
         metrics = evaluate(model, val_loader, criterion, device, config)
         metrics["train_loss"] = train_loss
         metrics["epoch"] = epoch + 1
-        print(f"epoch={epoch + 1} metrics={metrics}")
+        lr_current = float(optimizer.param_groups[0]["lr"])
+        metrics["lr"] = lr_current
+        print(f"epoch={epoch + 1} lr={lr_current:.2e} metrics={metrics}")
         improved = (
             best_metrics is None
             or metrics["rmse"] < best_metrics["rmse"] - float(config.train.early_stopping_min_delta)

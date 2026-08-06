@@ -11,12 +11,14 @@ class ModelConfig:
     text_hidden_size: int = 768
     image_hidden_size: int = 512
     audio_hidden_size: int = 256
-    tabular_hidden_size: int = 64
+    tabular_hidden_size: int = 128
     fusion_hidden_size: int = 256
     num_attention_heads: int = 4
-    fusion_layers: int = 2
-    fusion_ffn_size: int = 512
+    fusion_layers: int = 3
+    fusion_ffn_size: int = 768
     use_modality_gating: bool = True
+    use_auxiliary_loss: bool = True
+    auxiliary_loss_weight: float = 0.15
     dropout: float = 0.1
     max_text_length: int = 256
     local_text_vocab_size: int = 4096
@@ -30,8 +32,9 @@ class ModelConfig:
 @dataclass
 class TrainConfig:
     batch_size: int = 8
-    epochs: int = 5
+    epochs: int = 10
     learning_rate: float = 2e-4
+    backbone_learning_rate: float = 2e-5
     weight_decay: float = 1e-4
     max_grad_norm: Optional[float] = 1.0
     val_ratio: float = 0.2
@@ -61,12 +64,22 @@ class TrainConfig:
     dataloader_persistent_workers: bool = True
     dataloader_prefetch_factor: Optional[int] = 2
     cache_preprocessed_inputs: bool = True
+    cache_max_size: int = 10000
     mixed_precision: bool = True
-    early_stopping_patience: int = 3
-    early_stopping_min_delta: float = 0.0
+    early_stopping_patience: int = 5
+    early_stopping_min_delta: float = 1e-4
     freeze_text_encoder: bool = False
     freeze_image_encoder: bool = False
     freeze_audio_encoder: bool = False
+    gradient_accumulation_steps: int = 1
+    lr_scheduler_type: str = "cosine_with_warmup"
+    warmup_epochs: int = 2
+    warmup_ratio: Optional[float] = None
+    min_lr_ratio: float = 0.05
+    label_smoothing: float = 0.0
+    loss_type: str = "huber"
+    huber_delta: float = 0.5
+    enable_augmentation: bool = True
 
 
 @dataclass
