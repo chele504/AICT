@@ -228,6 +228,27 @@ def main() -> None:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print(f"\n[OK] 问卷对接 AICT 流水线全部完成。汇总见: {summary_path}")
 
+    report_html = questionnaire_output_dir / "report.html"
+    report_cmd = [
+        resolve_python_binary(),
+        str(Path("scripts") / "build_report_html.py"),
+        "--output-dir", str(questionnaire_output_dir),
+        "--model-dir", str(model_dir),
+        "--questionnaire-report", str((questionnaire_output_dir / "analysis_report.json").resolve()),
+        "--aict-dataset", str((questionnaire_output_dir / "aict_dataset.csv").resolve()),
+        "--train-csv", str(train_csv.resolve()),
+        "--test-csv", str(test_csv.resolve()),
+        "--output-html", str(report_html.resolve()),
+        "--title", "AI+文旅多模态融合成效评价报告（问卷自动生成）",
+        "--version", "AICT v2.0",
+    ]
+    code = run_step("生成可视化静态 HTML 报告（可直接浏览器打开）", report_cmd, Path.cwd())
+    if code == 0 and report_html.exists():
+        summary["outputs"]["visualization_report_html"] = str(report_html.resolve())
+        with summary_path.open("w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        print(f"[OK] 可视化报告: {report_html}")
+
 
 if __name__ == "__main__":
     main()

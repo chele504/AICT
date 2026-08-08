@@ -123,26 +123,39 @@ def discover_tabular_columns(
     df: pd.DataFrame,
     target_column: str,
     text_column: str,
-    image_column: str,
+    image_column: str | None = None,
     audio_column: str | None = None,
 ) -> List[str]:
-    ignored = {target_column, text_column, image_column}
+    ignored: set[str] = {target_column, text_column}
+    if image_column:
+        ignored.add(image_column)
     if audio_column:
         ignored.add(audio_column)
-    columns = [
-        col for col in df.columns if col not in ignored and pd.api.types.is_numeric_dtype(df[col])
-    ]
+    columns: list[str] = []
+    for col in df.columns:
+        if col in ignored:
+            continue
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        series = df[col].dropna()
+        if series.empty:
+            continue
+        std = float(series.std())
+        if not np.isfinite(std) or std <= 0:
+            continue
+        columns.append(col)
     if not columns:
         raise ValueError("未发现可用的结构化数值特征列。")
     return columns
 
 
 def prepare_splits(df: pd.DataFrame, config: AICTConfig) -> SplitBundle:
-    required_columns = [
+    required_columns: list[str] = [
         config.train.target_column,
         config.train.text_column,
-        config.train.image_column,
     ]
+    if config.train.image_column:
+        required_columns.append(config.train.image_column)
     if config.train.audio_column:
         required_columns.append(config.train.audio_column)
     missing_columns = [col for col in required_columns if col not in df.columns]
@@ -257,6 +270,7 @@ class AICTDataset(Dataset):
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
         )
+        self._placeholder_image = torch.zeros(3, 224, 224, dtype=torch.float32)
         self._text_dropout_prob = 0.05 if self.augment_enabled else 0.0
 
     def __len__(self) -> int:
@@ -276,7 +290,11 @@ class AICTDataset(Dataset):
             kept.append(ch)
         return "".join(kept) if kept else text
 
-    def _load_image(self, image_path: str) -> torch.Tensor:
+    def _load_image(self, image_path: str | None) -> torch.Tensor:
+        if not self.config.train.image_column or image_path is None or not str(image_path).strip():
+            if self.augment_enabled:
+                return self._placeholder_image + torch.randn_like(self._placeholder_image) * 0.01
+            return self._placeholder_image.clone()
         transform = self.image_transform if self.augment_enabled else self.eval_image_transform
         if self.cache_preprocessed_inputs and image_path in self._image_cache:
             cached = self._image_cache[image_path]
@@ -288,7 +306,9 @@ class AICTDataset(Dataset):
             return cached.clone()
         path = Path(image_path)
         if not path.exists():
-            raise FileNotFoundError(f"找不到图像文件: {image_path}")
+            if self.augment_enabled:
+                return self._placeholder_image + torch.randn_like(self._placeholder_image) * 0.01
+            return self._placeholder_image.clone()
         with Image.open(path) as image:
             image_tensor = transform(image.convert("RGB"))
         if self.cache_preprocessed_inputs:
@@ -439,11 +459,17 @@ class AICTDataset(Dataset):
         row = self.df.iloc[idx]
         text = str(row[self.config.train.text_column])
         encoded = self._encode_text(text)
+        image_path = (
+            str(row[self.config.train.image_column])
+            if self.config.train.image_column and self.config.train.image_column in row
+            else None
+        )
+        audio_value = row[self.audio_column] if self.audio_column and self.audio_column in row else None
         item = {
             "input_ids": encoded["input_ids"],
             "attention_mask": encoded["attention_mask"],
-            "image": self._load_image(str(row[self.config.train.image_column])),
-            "audio_inputs": self._load_audio(row[self.audio_column] if self.audio_column else None),
+            "image": self._load_image(image_path),
+            "audio_inputs": self._load_audio(audio_value),
             "tabular": torch.tensor(self._build_tabular(row), dtype=torch.float32),
             "target": torch.tensor(float(row[self.config.train.target_column]), dtype=torch.float32),
         }

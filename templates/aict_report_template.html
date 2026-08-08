@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AICT AI+文旅成效评价报告</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+  :root{
+    --primary:#2563eb;--primary-dark:#1e40af;--accent:#06b6d4;--accent-2:#f59e0b;
+    --success:#10b981;--danger:#ef4444;--bg:#f8fafc;--panel:#ffffff;--border:#e2e8f0;
+    --text:#0f172a;--muted:#64748b;--muted-2:#94a3b8;--shadow:0 4px 20px rgba(15,23,42,0.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.65}
+  a{color:var(--primary);text-decoration:none}
+  .container{max-width:1320px;margin:0 auto;padding:32px 24px 64px}
+  .hero{background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 50%,#06b6d4 100%);color:#fff;border-radius:20px;padding:44px 48px;margin-bottom:36px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .hero::after{content:"";position:absolute;right:-120px;top:-120px;width:360px;height:360px;background:radial-gradient(circle,rgba(255,255,255,.18),transparent 60%);border-radius:50%}
+  .hero::before{content:"";position:absolute;left:-80px;bottom:-80px;width:260px;height:260px;background:radial-gradient(circle,rgba(245,158,11,.18),transparent 60%);border-radius:50%}
+  .hero h1{font-size:30px;font-weight:700;margin-bottom:12px;position:relative;z-index:1}
+  .hero .subtitle{font-size:15px;opacity:.9;margin-bottom:24px;position:relative;z-index:1}
+  .hero-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;position:relative;z-index:1}
+  .hero-meta .meta-item{background:rgba(255,255,255,.12);backdrop-filter:blur(6px);border-radius:12px;padding:14px 18px;border:1px solid rgba(255,255,255,.18)}
+  .hero-meta .meta-item .k{font-size:12px;opacity:.8;margin-bottom:4px}
+  .hero-meta .meta-item .v{font-size:20px;font-weight:700}
+  .section{margin-bottom:36px}
+  .section-title{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:700;color:var(--text);margin-bottom:20px;padding-bottom:10px;border-bottom:2px solid var(--border)}
+  .section-title .num{display:inline-flex;width:32px;height:32px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;align-items:center;justify-content:center;border-radius:10px;font-size:15px;font-weight:700}
+  .grid{display:grid;gap:20px}
+  .grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  @media(max-width:1024px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+  @media(max-width:768px){.hero{padding:32px 24px}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:24px;box-shadow:var(--shadow)}
+  .card h3{font-size:16px;font-weight:600;margin-bottom:16px;color:var(--text);display:flex;align-items:center;gap:8px}
+  .card h3 .icon{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;color:#fff;font-size:12px}
+  .kpi-grid{margin-bottom:24px}
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px 24px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:4px 0 0 4px}
+  .kpi.primary::before{background:var(--primary)}.kpi.accent::before{background:var(--accent)}.kpi.accent2::before{background:var(--accent-2)}.kpi.success::before{background:var(--success)}
+  .kpi .label{font-size:13px;color:var(--muted);margin-bottom:6px}
+  .kpi .value{font-size:30px;font-weight:800;color:var(--text);letter-spacing:-.5px}
+  .kpi .sub{font-size:12px;color:var(--muted-2);margin-top:4px}
+  .chart-wrap{position:relative;width:100%;height:340px}
+  .chart-wrap.tall{height:420px}
+  .chart-wrap.half{height:280px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
+  th{background:#f1f5f9;color:var(--text);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+  tr:hover td{background:#f8fafc}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600}
+  .pill-primary{background:#dbeafe;color:#1e40af}
+  .pill-accent{background:#cffafe;color:#0e7490}
+  .pill-success{background:#d1fae5;color:#065f46}
+  .pill-warning{background:#fef3c7;color:#92400e}
+  .prog{background:#e2e8f0;border-radius:999px;height:8px;overflow:hidden;margin-top:4px}
+  .prog>span{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:999px;transition:width .6s ease}
+  .analysis-list{list-style:none;padding:0}
+  .analysis-list li{padding:12px 16px;background:#f8fafc;border-left:3px solid var(--primary);border-radius:0 8px 8px 0;margin-bottom:8px;font-size:14px;color:var(--text)}
+  .quality-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .quality-item{background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:14px}
+  .quality-item .qi-label{font-size:12px;color:var(--muted);margin-bottom:4px}
+  .quality-item .qi-value{font-size:22px;font-weight:700}
+  .footer{text-align:center;padding:32px;color:var(--muted-2);font-size:12px}
+  .tabs{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+  .tab{padding:8px 16px;border:1px solid var(--border);background:var(--panel);border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s}
+  .tab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+  .badge{display:inline-block;padding:2px 8px;background:#f1f5f9;border-radius:6px;font-size:11px;color:var(--muted);margin-left:6px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="hero">
+    <h1 id="hero-title">AI+文旅多模态融合成效评价报告</h1>
+    <div class="subtitle" id="hero-subtitle">基于文本 · 图像 · 语音 · 结构化指标四维融合的综合评价与可解释性诊断</div>
+    <div class="hero-meta" id="hero-meta">
+      <div class="meta-item"><div class="k">数据版本</div><div class="v" id="meta-version">v2.0</div></div>
+      <div class="meta-item"><div class="k">样本总数</div><div class="v" id="meta-samples">—</div></div>
+      <div class="meta-item"><div class="k">生成时间</div><div class="v" id="meta-time">—</div></div>
+      <div class="meta-item"><div class="k">模型R²</div><div class="v" id="meta-r2">—</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">1</span> 成效总览 · 关键指标看板</div>
+    <div class="grid grid-4 kpi-grid" id="kpi-grid"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">2</span> 一级维度评分与权重分布</div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--primary)">★</span>四维度评分雷达图</h3>
+        <div class="chart-wrap"><canvas id="chart-dimension-radar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--accent)">◎</span>一级指标权重占比（GRA+CV+皮尔逊+熵权四源融合）</h3>
+        <div class="chart-wrap"><canvas id="chart-dimension-pie"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3><span class="icon" style="background:var(--accent-2)">⌘</span>维度评分详细对比（百分制）</h3>
+      <div class="chart-wrap half"><canvas id="chart-dimension-bar"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">3</span> 问卷数据质量诊断（如适用）</div>
+    <div class="quality-grid" id="quality-grid"></div>
+    <div class="grid grid-2" style="margin-top:20px">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--success)">◰</span>样本分层占比（Valid / Review / Invalid）</h3>
+        <div class="chart-wrap half"><canvas id="chart-quality-donut"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--primary)">✓</span>质量违规标记次数</h3>
+        <div class="chart-wrap half"><canvas id="chart-quality-flags"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">4</span> 模型训练过程与性能</div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--primary)">↗</span>训练-验证损失曲线</h3>
+        <div class="chart-wrap tall"><canvas id="chart-loss"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--accent)">◆</span>R² / MAE / RMSE 指标对比（验证集）</h3>
+        <div class="chart-wrap tall"><canvas id="chart-metrics"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3><span class="icon" style="background:var(--accent-2)">✧</span>真实评分 vs 模型预测 散点拟合</h3>
+      <div class="chart-wrap tall"><canvas id="chart-scatter"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">5</span> 结构化特征驱动分析 · SHAP 归因</div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--success)">★</span>Top-K 关键驱动指标（SHAP 平均绝对贡献）</h3>
+        <div class="chart-wrap tall"><canvas id="chart-shap"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--primary)">❖</span>结构化指标权重（四源融合客观赋权）</h3>
+        <div class="chart-wrap tall"><canvas id="chart-indicator"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3><span class="icon" style="background:var(--accent)">⎙</span>驱动因素明细（带权重条）</h3>
+      <div id="indicator-table-wrap"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">6</span> 多模态融合机制诊断</div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--accent)">❐</span>动态模态门控权重（Modality Gates）</h3>
+        <div class="chart-wrap"><canvas id="chart-modality-gates"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--accent-2)">✷</span>首层跨模态注意力强度热力（数值）</h3>
+        <div id="cross-attention-table"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">7</span> 成效评分分布与等级划分</div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--primary)">◫</span>综合成效 target_score 直方图分布</h3>
+        <div class="chart-wrap"><canvas id="chart-histogram"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--success)">▣</span>等级划分占比（优秀/良好/中等/及格/待提升）</h3>
+        <div class="chart-wrap"><canvas id="chart-grade"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><span class="num">8</span> 自然语言分析综述</div>
+    <div class="tabs">
+      <div class="tab active" data-tab="goal">与课题目标对齐</div>
+      <div class="tab" data-tab="metric">模型结果解释</div>
+      <div class="tab" data-tab="dim">维度权重解释</div>
+      <div class="tab" data-tab="shap">驱动因素分析</div>
+      <div class="tab" data-tab="attn">模态协同分析</div>
+      <div class="tab" data-tab="path">四维提升路径</div>
+    </div>
+    <div class="card">
+      <div class="tab-panel active" id="tab-goal"><ul class="analysis-list" id="list-goal"></ul></div>
+      <div class="tab-panel" id="tab-metric"><ul class="analysis-list" id="list-metric"></ul></div>
+      <div class="tab-panel" id="tab-dim"><ul class="analysis-list" id="list-dim"></ul></div>
+      <div class="tab-panel" id="tab-shap"><ul class="analysis-list" id="list-shap"></ul></div>
+      <div class="tab-panel" id="tab-attn"><ul class="analysis-list" id="list-attn"></ul></div>
+      <div class="tab-panel" id="tab-path"><ul class="analysis-list" id="list-path"></ul></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    本报告由 AICT v2 多模态成效评价平台自动生成 · 数据可热替换：将新数据写入 <code>report_data.js</code> 或在 <code>window.AICT_REPORT_DATA</code> 中注入即可<br>
+    图表使用 Chart.js v4 · 无需后端，纯静态可直接部署到任何 Web 服务器
+  </div>
+</div>
+
+<!-- ============ 数据注入层（可热替换） ============== -->
+<!--
+  使用方式：
+  1) 每次训练完成后，运行 scripts/build_report_html.py 自动生成 report_data.js 并覆盖本文件对应变量；
+  2) 或直接修改/替换下方 AICT_REPORT_DATA 常量对象，无需改动 HTML 结构。
+-->
+<script>
+window.AICT_REPORT_DATA = window.AICT_REPORT_DATA || /*__AICT_DATA_INJECT__*/{
+  version:"示例数据 v1.0",
+  generated_at:new Date().toLocaleString('zh-CN'),
+  title:"AI+文旅多模态融合成效评价报告【示例】",
+  subtitle:"本页为模板占位数据；运行 scripts/build_report_html.py 可替换为真实训练 / 问卷结果。",
+  samples:552,
+  r2:0.7823,
+  kpis:[
+    {label:"综合成效均值",value:76.42,sub:"百分制 target_score 均值",type:"primary"},
+    {label:"验证集 MAE",value:4.81,sub:"平均绝对误差（越低越好）",type:"accent"},
+    {label:"验证集 RMSE",value:6.02,sub:"均方根误差（越低越好）",type:"accent2"},
+    {label:"有效样本率",value:"86.2%",sub:"476/552 通过质量校验",type:"success"}
+  ],
+  dimensions:{
+    labels:["技术赋能效能","游客感知体验","文化价值传播","经济社会增值"],
+    scores:[78.6, 80.1, 74.5, 72.3],
+    weights:[0.28, 0.30, 0.22, 0.20],
+    weight_alpha:0.65
+  },
+  quality:{
+    total:552, valid:476, review:76, invalid:0,
+    valid_rate:86.23, review_rate:13.77, invalid_rate:0,
+    flags:{
+      short_duration:42, straight_line:18, low_personal_variance:31,
+      duplicate_answer_pattern:22, duplicate_ip:56, overall_inconsistency:19
+    },
+    target_stats:{mean:76.42,std:12.18,min:35.2,median:78.0,max:97.5}
+  },
+  training:{
+    epochs:10,
+    train_loss:[0.621,0.412,0.302,0.245,0.201,0.178,0.158,0.145,0.136,0.130],
+    val_loss:[0.580,0.381,0.289,0.238,0.205,0.183,0.170,0.162,0.158,0.155],
+    best_epoch:8,
+    metrics:{loss:0.155,mae:4.81,rmse:6.02,r2:0.7823,train_loss:0.130,epoch:8}
+  },
+  scatter:{
+    true_vals:[62,68,72,75,78,80,82,84,86,88,90,92,55,60,65,70,73,77,79,83,85,87,89,91,48,52,58,63,67,71,74,76,81,87,93],
+    pred_vals:[60,66,74,76,79,81,80,85,85,87,88,94,53,58,63,71,72,76,80,82,86,88,90,92,46,54,57,61,68,70,75,77,82,86,95]
+  },
+  shap_top:[
+    {feature:"visitor_experience",label:"游客感知体验",mean_abs_shap:0.812},
+    {feature:"tech_empowerment",label:"技术赋能效能",mean_abs_shap:0.684},
+    {feature:"cultural_value",label:"文化价值传播",mean_abs_shap:0.542},
+    {feature:"economic_social_gain",label:"经济社会增值",mean_abs_shap:0.421},
+    {feature:"quality_score",label:"答卷质量分",mean_abs_shap:0.318},
+    {feature:"duration_seconds",label:"答题时长",mean_abs_shap:0.187},
+    {feature:"ai_sentiment_score",label:"开放题情感分",mean_abs_shap:0.142},
+    {feature:"has_meaningful_feedback",label:"有实质反馈",mean_abs_shap:0.095}
+  ],
+  indicator_weights:[
+    {feature:"tech_empowerment",label:"技术赋能效能",weight:0.221},
+    {feature:"visitor_experience",label:"游客感知体验",weight:0.305},
+    {feature:"cultural_value",label:"文化价值传播",weight:0.194},
+    {feature:"economic_social_gain",label:"经济社会增值",weight:0.158},
+    {feature:"quality_score",label:"答卷质量分",weight:0.061},
+    {feature:"duration_seconds",label:"答题时长(s)",weight:0.027},
+    {feature:"ai_sentiment_score",label:"开放题情感分",weight:0.024},
+    {feature:"ai_has_discomfort",label:"AI识别不舒适",weight:0.010},
+    {feature:"has_meaningful_feedback",label:"有实质反馈",weight:0.000}
+  ],
+  attention:{
+    gates:{text:0.48,image:0.06,audio:0.03,tabular:0.43},
+    cross_first_layer:{
+      text:{to_text:0.42,to_image:0.08,to_audio:0.05,to_tabular:0.45},
+      image:{to_text:0.30,to_image:0.35,to_audio:0.12,to_tabular:0.23},
+      audio:{to_text:0.28,to_image:0.12,to_audio:0.40,to_tabular:0.20},
+      tabular:{to_text:0.36,to_image:0.06,to_audio:0.04,to_tabular:0.54}
+    }
+  },
+  score_distribution:{
+    bins:["≤50","50-60","60-70","70-80","80-90","90-100"],
+    counts:[12,28,78,186,180,68]
+  },
+  grade_distribution:{
+    labels:["待提升(<60)","及格(60-70)","中等(70-80)","良好(80-90)","优秀(≥90)"],
+    counts:[40,78,186,180,68]
+  },
+  analysis:{
+    goal_alignment:["本报告围绕课题提出的“评价科学化、数据多维化、反馈智能化”总体目标，对“AI+文旅”应用成效开展结构化分析与研究性阐释。","在评价科学化方面，报告依据 GRA+CV+皮尔逊+熵权四源融合方法对四个一级指标进行客观赋权，并结合 80 组网格搜索对融合系数 α 进行自动优选。","在数据多维化方面，评价过程综合引入文本、图像、语音与结构化指标，并借助跨模态注意力机制揭示不同信息源之间的协同关系。","在反馈智能化方面，模型不仅输出综合成效分值，同时结合 SHAP 归因结果识别关键驱动因素，为景区运营优化和行业监管决策提供可解释依据。"],
+    metric_analysis:["模型在验证集上的平均绝对误差为 4.81，均方根误差为 6.02，决定系数 R²=0.7823。","总体来看，模型已具备较强的解释能力，能够较为稳定地刻画综合成效评分与多模态输入之间的对应关系。","训练集与验证集误差差距总体处于可接受范围，说明当前研究流程在原型阶段具备基本稳定性。"],
+    dimension_analysis:["一级指标权重整体呈均衡分布，其中“游客感知体验”与“技术赋能效能”相对突出，占比分别约为 30.0% 和 28.0%，表明当前评价体系在综合判断中兼顾了多维目标，没有出现对单一维度的明显偏置。"],
+    shap_analysis:["从 SHAP 归因结果看，“游客感知体验”是当前最关键的结构化驱动因素，其平均绝对贡献度约为 0.81。","排名前三的结构化影响因素分别为游客感知体验、技术赋能效能、文化价值传播，表明综合成效评价主要受这几类核心业务指标共同牵引。"],
+    attention_analysis:["从动态模态权重看，“文本模态”在当前样本中的平均权重最高，约为 48%，说明该模态在综合成效识别中承担了更为突出的信息支撑作用。","其次为“结构化指标模态”，其权重约为 43%，表明评价结果并非依赖单一信息源，而是体现出一定程度的跨模态协同。","在首层跨模态注意力中，结构化指标→文本的对齐强度较高，说明模型在早期融合阶段已经形成较为明确的“问卷指标-文字反馈”信息对齐方向。"],
+    path_analysis:["结合当前评价结果，后续可沿“技术迭代-场景适配-文化共鸣-产业增值”路径持续推进模型应用，其中现阶段最值得优先关注的维度是“游客感知体验”。","从关键驱动因素看，游客感知体验、技术赋能效能、文化价值传播对成效分值具有较强影响，说明优化路径宜优先聚焦于可持续采集、可持续反馈的核心业务指标。","在成果转化层面，本报告可为景区项目评估、场景优化复盘以及智慧文旅项目阶段性成效对比提供研究参考。"]
+  }
+}/*__END_AICT_DATA__*/;
+</script>
+
+<!-- ============== 渲染逻辑（不随训练结果变化） ============== -->
+<script>
+(function(){
+  const D = window.AICT_REPORT_DATA;
+  Chart.register(ChartDataLabels);
+
+  // --- 顶部 Hero ---
+  document.getElementById('hero-title').textContent = D.title || 'AI+文旅多模态融合成效评价报告';
+  document.getElementById('hero-subtitle').textContent = D.subtitle || '';
+  document.getElementById('meta-version').textContent = D.version || '—';
+  document.getElementById('meta-samples').textContent = D.samples != null ? D.samples : '—';
+  document.getElementById('meta-time').textContent = D.generated_at || '—';
+  document.getElementById('meta-r2').textContent = D.r2 != null ? Number(D.r2).toFixed(4) : '—';
+
+  // --- KPI ---
+  const kpiGrid = document.getElementById('kpi-grid');
+  (D.kpis || []).forEach(k=>{
+    const el = document.createElement('div');
+    el.className = 'kpi '+(k.type||'primary');
+    el.innerHTML = `<div class="label">${k.label}</div><div class="value">${k.value}</div>${k.sub?`<div class="sub">${k.sub}</div>`:''}`;
+    kpiGrid.appendChild(el);
+  });
+
+  // --- 基础调色盘 ---
+  const PALETTE = ['#2563eb','#06b6d4','#f59e0b','#10b981','#8b5cf6','#ef4444','#ec4899','#14b8a6','#6366f1','#f97316'];
+  const PALETTE_RGBA = PALETTE.map(c=>{
+    const h=c.replace('#','');return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},0.6)`
+  });
+
+  // --- 2. 四维度 ---
+  if(D.dimensions){
+    new Chart(document.getElementById('chart-dimension-radar'),{
+      type:'radar',
+      data:{
+        labels:D.dimensions.labels,
+        datasets:[{
+          label:'维度评分（百分制）',
+          data:D.dimensions.scores,
+          backgroundColor:'rgba(6,182,212,0.25)',
+          borderColor:'#06b6d4',
+          pointBackgroundColor:'#2563eb',
+          pointBorderColor:'#fff',
+          pointRadius:5,
+          borderWidth:2
+        }]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        scales:{r:{
+          suggestedMin:0,suggestedMax:100,
+          ticks:{backdropColor:'transparent',color:'#64748b'},
+          pointLabels:{font:{size:13,weight:'600'},color:'#0f172a'}
+        }},
+        plugins:{legend:{display:false},datalabels:{display:false}}
+      }
+    });
+
+    new Chart(document.getElementById('chart-dimension-pie'),{
+      type:'doughnut',
+      data:{
+        labels:D.dimensions.labels,
+        datasets:[{
+          data:D.dimensions.weights,
+          backgroundColor:PALETTE.slice(0,4),
+          borderColor:'#fff',borderWidth:3
+        }]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,cutout:'58%',
+        plugins:{
+          legend:{position:'bottom',labels:{padding:16,usePointStyle:true}},
+          datalabels:{
+            color:'#fff',font:{weight:700,size:13},
+            formatter:v=>(v*100).toFixed(1)+'%'
+          }
+        }
+      }
+    });
+
+    new Chart(document.getElementById('chart-dimension-bar'),{
+      type:'bar',
+      data:{
+        labels:D.dimensions.labels,
+        datasets:[
+          {type:'bar',label:'评分',data:D.dimensions.scores,backgroundColor:PALETTE_RGBA.slice(0,4),borderColor:PALETTE.slice(0,4),borderWidth:2,borderRadius:8,order:2,yAxisID:'y'},
+          {type:'line',label:'权重(×100)',data:D.dimensions.weights.map(v=>v*100),borderColor:'#ef4444',backgroundColor:'#ef4444',borderWidth:3,tension:.35,pointRadius:5,order:1,yAxisID:'y1'}
+        ]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        scales:{
+          y:{beginAtZero:true,max:100,title:{display:true,text:'评分（百分制）'}},
+          y1:{position:'right',beginAtZero:true,max:100,grid:{drawOnChartArea:false},title:{display:true,text:'权重占比(%)'}}
+        },
+        plugins:{legend:{position:'top'}}
+      }
+    });
+  }
+
+  // --- 3. 质量诊断 ---
+  if(D.quality){
+    const q=D.quality,grid=document.getElementById('quality-grid');
+    const qi=[
+      ['样本总数',q.total,'份','primary'],
+      ['Valid 通过',q.valid,'份','success'],
+      ['Review 待复核',q.review,'份','accent2'],
+      ['Invalid 无效',q.invalid||0,'份','danger'],
+      ['通过率',Number(q.valid_rate||0).toFixed(2)+'%','答卷质量','accent'],
+      ['综合均值',Number(q.target_stats?.mean||0).toFixed(2),'百分制 target_score','primary']
+    ];
+    qi.forEach(([l,v,s,t])=>{
+      const el=document.createElement('div');el.className='quality-item';
+      let cls='primary';
+      if(t==='success')cls='success';if(t==='accent')cls='primary';if(t==='accent2')cls='accent';if(t==='danger')cls='danger';
+      el.innerHTML=`<div class="qi-label">${l}<span class="badge">${s}</span></div><div class="qi-value" style="color:var(--${cls})">${v}</div>`;
+      grid.appendChild(el);
+    });
+
+    new Chart(document.getElementById('chart-quality-donut'),{
+      type:'doughnut',
+      data:{labels:['Valid(通过)','Review(待复核)','Invalid(无效)'],datasets:[{
+        data:[q.valid||0,q.review||0,q.invalid||0],
+        backgroundColor:['#10b981','#f59e0b','#ef4444'],borderColor:'#fff',borderWidth:3
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
+        plugins:{legend:{position:'bottom',labels:{padding:16,usePointStyle:true}},
+          datalabels:{color:'#fff',font:{weight:700},formatter:(v,ctx)=>{const s=ctx.dataset.data.reduce((a,b)=>a+b,0);return s>0?Math.round(v/s*100)+'%':'0%'}}
+        }}
+    });
+
+    const flagNames={
+      short_duration:'答题时长过短',straight_line:'直线答案',low_personal_variance:'个人方差过低',
+      duplicate_answer_pattern:'重复答题向量',duplicate_ip:'重复IP',overall_inconsistency:'总体不一致'
+    };
+    const fKeys=Object.keys(q.flags||{});
+    new Chart(document.getElementById('chart-quality-flags'),{
+      type:'bar',
+      data:{labels:fKeys.map(k=>flagNames[k]||k),datasets:[{
+        label:'被标记次数',data:fKeys.map(k=>q.flags[k]),backgroundColor:PALETTE_RGBA.slice(0,fKeys.length),borderColor:PALETTE.slice(0,fKeys.length),borderWidth:1.5,borderRadius:8
+      }]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false}},scales:{x:{beginAtZero:true}}}
+    });
+  }
+
+  // --- 4. 训练曲线与指标 ---
+  if(D.training){
+    const t=D.training;
+    const labels=Array.from({length:t.epochs||(t.train_loss||[]).length},(_,i)=>'E'+(i+1));
+    new Chart(document.getElementById('chart-loss'),{
+      type:'line',
+      data:{labels,datasets:[
+        {label:'训练损失',data:t.train_loss,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,0.15)',fill:true,tension:.35,borderWidth:2.5,pointRadius:3},
+        {label:'验证损失',data:t.val_loss,borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,0.10)',fill:true,tension:.35,borderWidth:2.5,pointRadius:3,dash:[6,4]}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{position:'top'},annotation:t.best_epoch?{
+          annotations:{line:{type:'line',xMin:'E'+t.best_epoch,xMax:'E'+t.best_epoch,borderColor:'#f59e0b',borderWidth:2,borderDash:[5,5],label:{display:true,content:'最佳轮次 E'+t.best_epoch,position:'start',backgroundColor:'#f59e0b',color:'#fff'}}}}:{}
+      }}
+    });
+
+    if(t.metrics){
+      const m=t.metrics;
+      new Chart(document.getElementById('chart-metrics'),{
+        type:'bar',
+        data:{labels:['MAE','RMSE','R²×100','Loss×100','Train Loss×100'],datasets:[{
+          label:'数值',
+          data:[m.mae,m.rmse,(m.r2||0)*100,(m.loss||0)*100,(m.train_loss||0)*100],
+          backgroundColor:['#06b6d4','#2563eb','#10b981','#f59e0b','#8b5cf6'],borderRadius:10,borderWidth:0
+        }]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},
+            datalabels:{color:'#fff',font:{weight:700},formatter:v=>Number(v).toFixed(2)}
+          },scales:{y:{beginAtZero:true}}}
+      });
+    }
+  }
+
+  if(D.scatter){
+    const trueV=D.scatter.true_vals||[],predV=D.scatter.pred_vals||[];
+    const pt=trueV.map((v,i)=>({x:v,y:predV[i]}));
+    const minVal=Math.min(...trueV,...predV)-2,maxVal=Math.max(...trueV,...predV)+2;
+    const line=[{x:minVal,y:minVal},{x:maxVal,y:maxVal}];
+    new Chart(document.getElementById('chart-scatter'),{
+      type:'scatter',
+      data:{datasets:[
+        {type:'scatter',label:'样本（真实 vs 预测）',data:pt,backgroundColor:'rgba(37,99,235,0.55)',borderColor:'#1e40af',pointRadius:6},
+        {type:'line',label:'理想 1:1 参考线',data:line,borderColor:'#ef4444',borderWidth:2,borderDash:[8,4],pointRadius:0,fill:false}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,
+        scales:{x:{title:{display:true,text:'真实评分 target_score'},min:minVal,max:maxVal},
+                y:{title:{display:true,text:'模型预测评分'},min:minVal,max:maxVal}},
+        plugins:{legend:{position:'top'}}}
+    });
+  }
+
+  // --- 5. SHAP + 指标权重 ---
+  if(D.shap_top){
+    const shap=[...D.shap_top].reverse();
+    new Chart(document.getElementById('chart-shap'),{
+      type:'bar',
+      data:{labels:shap.map(r=>r.label||r.feature),datasets:[{
+        label:'SHAP 平均绝对贡献',data:shap.map(r=>r.mean_abs_shap),
+        backgroundColor:shap.map((_,i)=>PALETTE_RGBA[i%PALETTE.length]),
+        borderColor:shap.map((_,i)=>PALETTE[i%PALETTE.length]),borderWidth:1.5,borderRadius:6
+      }]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false}},scales:{x:{beginAtZero:true}}}
+    });
+  }
+  if(D.indicator_weights){
+    const iw=[...D.indicator_weights].sort((a,b)=>a.weight-b.weight);
+    new Chart(document.getElementById('chart-indicator'),{
+      type:'bar',
+      data:{labels:iw.map(r=>r.label||r.feature),datasets:[{
+        label:'客观赋权权重',data:iw.map(r=>r.weight),
+        backgroundColor:iw.map((_,i)=>PALETTE_RGBA[i%PALETTE.length]),
+        borderColor:iw.map((_,i)=>PALETTE[i%PALETTE.length]),borderWidth:1.5,borderRadius:6
+      }]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},datalabels:{color:'#0f172a',font:{weight:700},formatter:v=>(v*100).toFixed(2)+'%'}},
+        scales:{x:{beginAtZero:true}}}
+    });
+
+    const wrap=document.getElementById('indicator-table-wrap');
+    const max=Math.max(...iw.map(r=>r.weight),1e-9);
+    wrap.innerHTML=`<table><thead><tr><th>指标名</th><th>原始字段</th><th>权重</th><th>占比</th><th>贡献条</th></tr></thead><tbody>${
+      [...iw].reverse().map(r=>`<tr>
+        <td><strong>${r.label||r.feature}</strong></td>
+        <td><code style="font-size:12px;color:#475569">${r.feature}</code></td>
+        <td>${Number(r.weight).toFixed(5)}</td>
+        <td><span class="pill pill-primary">${(r.weight*100).toFixed(2)}%</span></td>
+        <td style="min-width:240px"><div class="prog"><span style="width:${(r.weight/max*100).toFixed(1)}%"></span></div></td>
+      </tr>`).join('')
+    }</tbody></table>`;
+  }
+
+  // --- 6. 模态融合 ---
+  if(D.attention){
+    const a=D.attention;
+    const modality_cn={text:'文本',image:'图像',audio:'语音',tabular:'结构化'};
+    if(a.gates){
+      const keys=Object.keys(a.gates);
+      new Chart(document.getElementById('chart-modality-gates'),{
+        type:'polarArea',
+        data:{labels:keys.map(k=>modality_cn[k]||k),datasets:[{
+          data:keys.map(k=>a.gates[k]),backgroundColor:PALETTE.slice(0,keys.length).map(c=>c.replace(')',',0.75)').replace('rgb','rgba')||c)
+        }]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{position:'bottom'},
+            datalabels:{color:'#fff',font:{weight:700},formatter:v=>(v*100).toFixed(0)+'%'}
+          }}
+      });
+    }
+    if(a.cross_first_layer){
+      const qs=Object.keys(a.cross_first_layer);
+      const header=['查询模态 →'].concat(qs.map(q=>'指向 '+ (modality_cn[q.replace(/^to_/,'')]||q)));
+      const rows=qs.map(q=>{
+        const row=a.cross_first_layer[q]||{};
+        const vals=qs.map(target=>{
+          const k='to_'+target;const v=row[k]||0;
+          const pct=(v*100).toFixed(1);
+          const intensity=Math.min(1,v/0.6);
+          const bg=`rgba(37,99,235,${0.12+intensity*0.68})`;
+          const fg=intensity>0.48?'#ffffff':'#0f172a';
+          return `<td style="background:${bg};color:${fg};font-weight:700;text-align:center;border-radius:6px">${pct}%</td>`;
+        });
+        return `<tr><td><strong>${modality_cn[q]||q}</strong></td>${vals.join('')}</tr>`;
+      });
+      document.getElementById('cross-attention-table').innerHTML=
+        `<table><thead><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>
+         <p style="margin-top:12px;font-size:12px;color:#64748b">数值=首层 CrossModalAttention 中 「查询模态 → 目标模态」的平均注意力权重（%）；颜色越深，信息对齐越强。</p>`;
+    }
+  }
+
+  // --- 7. 分布 ---
+  if(D.score_distribution){
+    new Chart(document.getElementById('chart-histogram'),{
+      type:'bar',
+      data:{labels:D.score_distribution.bins,datasets:[{
+        label:'样本数',data:D.score_distribution.counts,
+        backgroundColor:['#ef4444','#f59e0b','#06b6d4','#2563eb','#8b5cf6','#10b981'],
+        borderRadius:8,borderWidth:0
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},
+          datalabels:{color:'#fff',font:{weight:700},anchor:'end',align:'top'}},
+        scales:{y:{beginAtZero:true}}}
+    });
+  }
+  if(D.grade_distribution){
+    new Chart(document.getElementById('chart-grade'),{
+      type:'doughnut',
+      data:{labels:D.grade_distribution.labels,datasets:[{
+        data:D.grade_distribution.counts,
+        backgroundColor:['#ef4444','#f59e0b','#06b6d4','#2563eb','#10b981'],
+        borderColor:'#fff',borderWidth:3
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',
+        plugins:{legend:{position:'bottom',labels:{padding:14,usePointStyle:true}},
+          datalabels:{color:'#fff',font:{weight:700},formatter:(v,ctx)=>{const s=ctx.dataset.data.reduce((a,b)=>a+b,0);return s>0?Math.round(v/s*100)+'%':'0%'}}
+        }}
+    });
+  }
+
+  // --- 8. 分析综述 + Tabs ---
+  const ana=D.analysis||{};
+  const mapping={goal:'goal_alignment',metric:'metric_analysis',dim:'dimension_analysis',shap:'shap_analysis',attn:'attention_analysis',path:'path_analysis'};
+  Object.entries(mapping).forEach(([tab,key])=>{
+    const ul=document.getElementById('list-'+tab);if(!ul)return;
+    (ana[key]||Array.isArray(ana[key])?ana[key]:[]).forEach(text=>{
+      const li=document.createElement('li');li.textContent=Array.isArray(text)?text.join(''):text;
+      ul.appendChild(li);
+    });
+    if(ul.children.length===0){
+      ul.innerHTML='<li>暂无对应分析文本（如为问卷场景跳过模态部分属正常）。</li>';
+    }
+  });
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById('tab-'+t.dataset.tab).classList.add('active');
+    });
+  });
+})();
+</script>
+</body>
+</html>

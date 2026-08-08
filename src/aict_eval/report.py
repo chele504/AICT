@@ -301,10 +301,31 @@ def summarize_attention(
         for layer_idx, layer_attn in enumerate(attentions):
             if layer_attn is None:
                 continue
-            for key in modality_names:
-                raw = layer_attn[key]
-                w = raw.mean(dim=(1, 2)).detach().cpu().numpy()
-                attn_sums[layer_idx][key] += w.sum(axis=0)
+            for q_idx, q_name in enumerate(modality_names):
+                q_block = layer_attn.get(q_name)
+                if q_block is None:
+                    continue
+                if isinstance(q_block, torch.Tensor):
+                    tensor = q_block.detach().cpu()
+                    if tensor.dim() >= 4:
+                        weights = tensor.mean(dim=(1, 2)).sum(axis=0)
+                        if weights.shape[0] == len(modality_names):
+                            attn_sums[layer_idx][q_name] += weights.numpy()
+                    continue
+                if isinstance(q_block, dict):
+                    for k_idx, k_name in enumerate(modality_names):
+                        target_key = f"to_{k_name}"
+                        if target_key not in q_block:
+                            continue
+                        tensor = q_block[target_key]
+                        if not isinstance(tensor, torch.Tensor):
+                            continue
+                        w = tensor.detach().cpu()
+                        if w.dim() >= 2:
+                            w_scalar = float(w.mean().item())
+                        else:
+                            w_scalar = float(w.sum().item())
+                        attn_sums[layer_idx][q_name][k_idx] += w_scalar * batch_size
         attn_count += batch_size
 
     out: dict = {}

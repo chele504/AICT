@@ -13,3 +13,17 @@ _tmp_*.py
 _tmp_*.jsonl
 tmp/
 temp/
+*.zip
+_zip_extract_tmp/
+_zip_diff*.txt
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.th
+*.onnx
+*.keras
+*_cache/
+*.log
+logs/

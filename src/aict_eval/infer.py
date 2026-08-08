@@ -42,13 +42,17 @@ def apply_saved_scaler(df: pd.DataFrame, tabular_columns: list[str], artifacts: 
 
 def validate_and_prepare_columns(df: pd.DataFrame, config, tabular_columns: list[str]) -> pd.DataFrame:
     prepared = df.copy()
-    required_columns = [config.train.text_column, config.train.image_column]
+    required_columns: list[str] = [config.train.text_column]
+    if config.train.image_column:
+        required_columns.append(config.train.image_column)
     missing_columns = [col for col in required_columns if col not in prepared.columns]
     if missing_columns:
         raise ValueError(f"预测数据缺少必要列: {', '.join(missing_columns)}")
     missing_tabular = [col for col in tabular_columns if col not in prepared.columns]
     if missing_tabular:
         raise ValueError(f"预测数据缺少结构化特征列: {', '.join(missing_tabular)}")
+    if config.train.image_column and config.train.image_column not in prepared.columns:
+        prepared[config.train.image_column] = ""
     if config.train.audio_column and config.train.audio_column not in prepared.columns:
         prepared[config.train.audio_column] = ""
     if config.train.target_column not in prepared.columns:

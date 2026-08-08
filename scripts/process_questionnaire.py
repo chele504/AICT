@@ -25,7 +25,7 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
 DEFAULT_SCORING = {
-    "input_value_order": "direct",
+    "input_value_order": "reverse_order",
     "dimensions": {
         "tech_empowerment": {
             "items": [1, 2, 3, 4, 5],
@@ -74,7 +74,6 @@ DEFAULT_QUALITY = {
         "没有不舒适",
         "无明显不适",
         "无需改进",
-        "没有问题",
     ],
 }
 
@@ -526,7 +525,7 @@ def build_processed_frame(
     for number in range(1, QUESTION_COUNT + 1):
         processed[f"q{number}"] = raw[question_columns[number]].map(normalize_likert)
 
-    input_value_order = config["scoring"].get("input_value_order", "direct")
+    input_value_order = config["scoring"].get("input_value_order", "reverse_order")
     if input_value_order not in {"direct", "reverse_order"}:
         raise ValueError("scoring.input_value_order 只能是 direct 或 reverse_order")
     if input_value_order == "reverse_order":
@@ -717,40 +716,29 @@ def assign_splits(processed: pd.DataFrame, config: dict[str, Any]) -> pd.DataFra
 
 
 def build_model_dataset(processed: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
-    dimension_keys = list(config["scoring"]["dimensions"].keys())
-    base_columns = [
+    columns = [
         "review_text",
         "duration_seconds",
         "has_meaningful_feedback",
         "ai_has_discomfort",
         "ai_sentiment_score",
         "ai_confidence",
-        "quality_score",
-        *dimension_keys,
         "target_score",
         "dataset_split",
     ]
     model_config = config.get("model_dataset", {})
-    final_columns = list(base_columns)
     if model_config.get("include_question_items", False):
-        for i in range(20, 0, -1):
-            final_columns.insert(1, f"q{i}")
-    if model_config.get("include_derived_dimensions", True):
-        if not set(dimension_keys).issubset(set(final_columns)):
-            for name in reversed(dimension_keys):
-                final_columns.insert(1, name)
-
-    final_columns = [c for c in final_columns if c in processed.columns]
+        columns[1:1] = [f"q{i}" for i in range(1, 21)]
+    if model_config.get("include_derived_dimensions", False):
+        columns[1:1] = list(config["scoring"]["dimensions"].keys())
+    final_columns = [c for c in columns if c in processed.columns]
     model = processed[final_columns].copy()
-    if "image_path" not in model.columns:
-        model.insert(1, "image_path", "")
-    if "audio_path" not in model.columns:
-        model.insert(2, "audio_path", "")
+    model.insert(1, "image_path", "PLACEHOLDER_IMAGE")
+    model.insert(2, "audio_path", "PLACEHOLDER_AUDIO")
     numeric_columns = model.select_dtypes(include="number").columns
     model[numeric_columns] = model[numeric_columns].fillna(0)
-    for column in ("has_meaningful_feedback", "ai_has_discomfort"):
-        if column in model.columns:
-            model[column] = model[column].astype(int)
+    model["has_meaningful_feedback"] = model["has_meaningful_feedback"].astype(int)
+    model["ai_has_discomfort"] = model["ai_has_discomfort"].astype(int)
     return model
 
 
@@ -763,23 +751,16 @@ def build_report(
     dimensions = config["scoring"]["dimensions"]
     q_columns = [f"q{i}" for i in range(1, 21)]
     quality_flag_columns = [column for column in processed.columns if column.startswith("flag_")]
-    report = {
+    report: dict[str, Any] = {
         "analysis_time": datetime.now().isoformat(),
         "input_file": str(input_path.resolve()),
         "scoring_version": "20-item-5-per-dimension-v1",
-        "input_value_order": config["scoring"].get("input_value_order", "direct"),
+        "input_value_order": config["scoring"].get("input_value_order", "reverse_order"),
         "total_records": int(len(processed)),
         "valid_records": int(processed["is_valid"].sum()),
         "review_records": int((processed["quality_status"] == "review").sum()),
         "invalid_records": int((processed["quality_status"] == "invalid").sum()),
         "split_counts": {str(k): int(v) for k, v in processed["dataset_split"].value_counts().items()},
-        "summary": {
-            "target_score_mean": round(float(processed["target_score"].mean()), 4),
-            "target_score_std": round(float(processed["target_score"].std()), 4),
-            "target_score_min": round(float(processed["target_score"].min()), 4),
-            "target_score_median": round(float(processed["target_score"].median()), 4),
-            "target_score_max": round(float(processed["target_score"].max()), 4),
-        },
         "target_score": {
             "mean": round(float(processed["target_score"].mean()), 4),
             "std": round(float(processed["target_score"].std()), 4),
@@ -817,41 +798,20 @@ def build_report(
         },
         "method_notes": [
             "四个一级维度均按5个题项计算，题项均为1-5分正向计分。",
-            "input_value_order=direct 表示导出值就是实际分数；reverse_order 表示第1个选项实际为5分，按6-导出值换算。",
+            "input_value_order=direct 表示导出值就是实际分数；reverse_order 表示问卷选项按“5、4、3、2、1”顺序排列，导出值为选项位置，按 实际分数 = 6 - 导出值 换算。",
             "质量标记用于筛查与人工复核，不等同于对受访者真实性作最终认定。",
-            "DeepSeek仅接收脱敏后的开放题文本，不接收IP、时间或问卷编号。",
-            "默认模型数据不包含q1-q20和四个派生维度，避免用生成标签的字段预测同一标签。",
-            "本流水线兼容两种column_mapping格式：(1)新版嵌套结构questions/metadata/dimensions；(2)旧版扁平化q1..q21结构。",
+            "DeepSeek 仅接收脱敏后的开放题文本，不接收 IP、时间或问卷编号。",
+            "默认模型数据不包含 q1-q20 和四个派生维度，避免用生成标签的字段预测同一标签。",
         ],
     }
     for name, dimension in dimensions.items():
         columns = [f"q{i}" for i in dimension["items"]]
-        item_stats: dict[str, Any] = {}
-        for col in columns:
-            series = processed[col].dropna()
-            dist = series.value_counts().sort_index().to_dict() if series.size else {}
-            item_stats[col] = {
-                "text": str(column_mapping["questions"][col])
-                if column_mapping and "questions" in column_mapping and col in column_mapping["questions"]
-                else col,
-                "mean": round(float(series.mean()), 4) if series.size else None,
-                "std": round(float(series.std()), 4) if series.size else None,
-                **{f"d{int(k)}": int(v) for k, v in dist.items() if 1 <= int(k) <= 5},
-            }
         report["dimensions"][name] = {
             "name_cn": dimension["name_cn"],
             "items": columns,
             "weight": dimension["weight"],
             "mean": round(float(processed[name].mean()), 4),
             "std": round(float(processed[name].std()), 4),
-            "min": round(float(processed[name].min()), 4),
-            "max": round(float(processed[name].max()), 4),
-            "median": round(float(processed[name].median()), 4),
-            "q25": round(float(processed[name].quantile(0.25)), 4),
-            "q75": round(float(processed[name].quantile(0.75)), 4),
-            "n_valid": int(processed[name].notna().sum()),
-            "n_missing": int(processed[name].isna().sum()),
-            "question_level": item_stats,
             "cronbach_alpha": cronbach_alpha(processed[columns]),
         }
     return report
@@ -904,10 +864,10 @@ def process_questionnaire(
 
     processed.to_csv(output_dir / "questionnaire_analysis.csv", index=False, encoding="utf-8-sig")
     model_dataset.to_csv(output_dir / "aict_dataset.csv", index=False, encoding="utf-8-sig")
-    model_dataset[model_dataset["dataset_split"] == "train"].drop(columns=["dataset_split"]).to_csv(
+    model_dataset[model_dataset["dataset_split"] == "train"].to_csv(
         output_dir / "train_dataset.csv", index=False, encoding="utf-8-sig"
     )
-    model_dataset[model_dataset["dataset_split"] == "test"].drop(columns=["dataset_split"]).to_csv(
+    model_dataset[model_dataset["dataset_split"] == "test"].to_csv(
         output_dir / "test_dataset.csv", index=False, encoding="utf-8-sig"
     )
     processed[processed["quality_status"] != "pass"].to_csv(
@@ -941,24 +901,62 @@ def process_questionnaire(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="处理AI+文旅20题问卷并生成AICT数据集")
-    parser.add_argument("--input", required=True, help="问卷星原始CSV或已生成的scored_full.csv")
+    parser.add_argument("--input", required=True, help="问卷星原始CSV或现有scored_full.csv")
     parser.add_argument("--output-dir", required=True, help="输出目录")
     parser.add_argument(
         "--config",
-        default=None,
-        help="处理配置 JSON（可选，不指定则使用内置默认配置）",
+        default=str(Path(__file__).resolve().parents[1] / "configs" / "questionnaire_pipeline.json"),
+        help="处理配置 JSON",
     )
     parser.add_argument(
         "--enable-ai",
         action="store_true",
-        help="调用DeepSeek分析有效开放题；需先设置 DEEPSEEK_API_KEY 环境变量",
+        help="调用DeepSeek分析有效开放题；需要设置DEEPSEEK_API_KEY",
     )
     args = parser.parse_args()
-    process_questionnaire(
-        input_path=args.input,
-        output_dir=args.output_dir,
-        config_path=args.config,
-        enable_ai=bool(args.enable_ai),
+
+    input_path = Path(args.input)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config = load_json(Path(args.config))
+    raw = read_csv(input_path)
+    processed, mapping = build_processed_frame(
+        raw,
+        config,
+        enable_ai=args.enable_ai,
+        cache_path=output_dir / "ai_cache.jsonl",
+    )
+    processed = assign_splits(processed, config)
+    model_dataset = build_model_dataset(processed, config)
+    report = build_report(processed, config, input_path)
+
+    processed.to_csv(output_dir / "questionnaire_analysis.csv", index=False, encoding="utf-8-sig")
+    model_dataset.to_csv(output_dir / "aict_dataset.csv", index=False, encoding="utf-8-sig")
+    model_dataset[model_dataset["dataset_split"] == "train"].to_csv(
+        output_dir / "train_dataset.csv", index=False, encoding="utf-8-sig"
+    )
+    model_dataset[model_dataset["dataset_split"] == "test"].to_csv(
+        output_dir / "test_dataset.csv", index=False, encoding="utf-8-sig"
+    )
+    processed[processed["quality_status"] != "pass"].to_csv(
+        output_dir / "review_queue.csv", index=False, encoding="utf-8-sig"
+    )
+    write_json(output_dir / "column_mapping.json", mapping)
+    write_json(output_dir / "analysis_report.json", report)
+    print(
+        json.dumps(
+            {
+                "input_records": len(raw),
+                "valid_records": int(processed["is_valid"].sum()),
+                "review_records": int((processed["quality_status"] == "review").sum()),
+                "output_dir": str(output_dir.resolve()),
+                "ai_requested": bool(args.enable_ai),
+                "deepseek_records": int(
+                    (processed["ai_analysis_source"] == "deepseek").sum()
+                ),
+            },
+            ensure_ascii=False,
+        )
     )
 
 
