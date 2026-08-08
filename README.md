@@ -352,6 +352,55 @@ train:
 
 ---
 
+## 问卷流水线对接（一键从问卷星 CSV → AICT v2 训练闭环）
+
+针对「问卷星 20 题量表 + 1 道开放题」的典型 AI+文旅 成效评价问卷场景，主仓库已经内置完整脚本，**无需额外子目录**，直接使用以下两种入口即可。
+详见独立文档 [QUESTIONNAIRE_PIPELINE.md](file:///c:/Users/lenovo/Desktop/AICT/QUESTIONNAIRE_PIPELINE.md)。
+
+### 快速使用：仅跑问卷打分与结构化拆分（无需模型训练）
+
+```powershell
+python scripts/process_questionnaire.py `
+  --input "aict_output\scored_full.csv" `
+  --output-dir "outputs\questionnaire_v2"
+```
+
+内置默认配置，`--config` 完全可省略；同时兼容：
+- 问卷星原始导出 CSV（中文长题列名）
+- 旧版 `aict_output/scored_full.csv` 中间产物
+- 旧版扁平 `aict_output/column_mapping.json`
+- 旧版 `aict_output/analysis_report.json` 字段名（报告同时输出新旧两套字段）
+
+### 推荐：一键全闭环（问卷 → 结构化 → AICT v2 模型训练 → 测试集预测）
+
+```powershell
+python scripts/questionnaire_to_aict_pipeline.py `
+  --input "aict_output\scored_full.csv" `
+  --questionnaire-output-dir "outputs\questionnaire_pipeline" `
+  --questionnaire-config "configs\questionnaire_pipeline.json" `
+  --model-config "configs\questionnaire_model.yaml" `
+  --enable-ai   # 可选：需设置 $env:DEEPSEEK_API_KEY
+```
+
+最终在 `outputs\questionnaire_pipeline\pipeline_summary.json` 汇总所有输入路径、输出路径和训练指标，便于 CI 审计。
+
+### 问卷流水线核心产物与主系统对接字段
+
+| 问卷输出文件 | 下游 AICT v2 对接对象 | 关键字段对齐 |
+| --- | --- | --- |
+| `aict_dataset.csv` | `src/aict_eval/dataset.py` 的 `MultimodalDataset` | 严格对齐 README "最低要求" 字段：`review_text / image_path / audio_path / target_score`；额外追加四维分 + `quality_score` + AI 分析 4 列，共 15 列（数值部分自动走 6 种去噪 + 4 源客观赋权 + 80 组 α 网格搜索）。 |
+| `train_dataset.csv` | `python -m src.aict_eval.train --data <this>` | 不含 `dataset_split` 列，直接符合 README "训练数据 CSV 格式"约定。 |
+| `test_dataset.csv` | `python -m src.aict_eval.infer --data <this>` | 同上。 |
+| `analysis_report.json` | `src/aict_eval/weights.py` + `filters.py` 先验参考 | 输出四维分 Cronbach α / 质量罚分统计量 / target_score 全量分位数，供调参决策。 |
+
+### 标签泄漏防护策略（默认安全）
+
+- **默认排除 q1~q20 题项本身**（防止 20 道题直接线性解出 target_score）；
+- **默认保留四维分 + quality_score + ai_* 结构化特征**（聚合级特征不泄漏）；
+- 若需要更保守，在 [questionnaire_pipeline.json](file:///c:/Users/lenovo/Desktop/AICT/configs/questionnaire_pipeline.json) 中设置 `include_derived_dimensions: false`。
+
+---
+
 ## 训练输出
 
 输出目录默认为 `outputs/`（可在配置中修改）：

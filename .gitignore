@@ -6,3 +6,10 @@
 **/__pycache__/
 *.pyc
 .DS_Store
+.vscode/
+outputs*/
+*ai_cache.jsonl
+_tmp_*.py
+_tmp_*.jsonl
+tmp/
+temp/

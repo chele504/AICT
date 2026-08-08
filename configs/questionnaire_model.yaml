@@ -1,0 +1,69 @@
+model:
+  allow_online_model_download: false
+  text_model_name: "bert-base-chinese"
+  text_hidden_size: 768
+  image_model_name: "resnet18"
+  audio_backbone_type: "stats"
+  audio_model_name: "facebook/wav2vec2-base-960h"
+  tabular_hidden_size: 128
+  fusion_hidden_size: 256
+  num_attention_heads: 4
+  fusion_layers: 3
+  fusion_ffn_size: 768
+  use_modality_gating: true
+  use_auxiliary_loss: true
+  auxiliary_loss_weight: 0.15
+  dropout: 0.1
+  max_text_length: 256
+  local_text_vocab_size: 4096
+  audio_sample_rate: 16000
+  audio_duration_seconds: 2.0
+  audio_n_fft: 400
+  audio_hop_length: 160
+
+train:
+  target_column: "target_score"
+  text_column: "review_text"
+  image_column: null
+  audio_column: null
+  output_dir: "outputs_questionnaire"
+  batch_size: 8
+  epochs: 10
+  learning_rate: 0.0002
+  backbone_learning_rate: 0.00002
+  weight_decay: 0.0001
+  max_grad_norm: 1.0
+  val_ratio: 0.2
+  random_seed: 42
+  gradient_accumulation_steps: 1
+  lr_scheduler_type: "cosine_with_warmup"
+  warmup_epochs: 2
+  min_lr_ratio: 0.05
+  loss_type: "huber"
+  huber_delta: 0.5
+  label_smoothing: 0.0
+  enable_augmentation: false
+  mixed_precision: true
+  early_stopping_patience: 5
+  early_stopping_min_delta: 0.0001
+  auto_indicator_weight_alpha: true
+  indicator_weight_alpha: 0.5
+  cache_preprocessed_inputs: true
+  cache_max_size: 10000
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  dataloader_persistent_workers: true
+  dataloader_prefetch_factor: 2
+  freeze_text_encoder: false
+  freeze_image_encoder: false
+  freeze_audio_encoder: false
+
+explain:
+  background_size: 64
+  sample_size: 32
+
+report:
+  enabled: true
+  top_k_features: 12
+  write_markdown: true
+  attention_summary_max_batches: 8

@@ -1,0 +1,43 @@
+{
+  "scoring": {
+    "input_value_order": "direct",
+    "dimensions": {
+      "tech_empowerment": {"items": [1, 2, 3, 4, 5], "weight": 0.25, "name_cn": "技术赋能效能"},
+      "visitor_experience": {"items": [6, 7, 8, 9, 10], "weight": 0.30, "name_cn": "游客感知体验"},
+      "cultural_value": {"items": [11, 12, 13, 14, 15], "weight": 0.25, "name_cn": "文化价值传播"},
+      "economic_social_gain": {"items": [16, 17, 18, 19, 20], "weight": 0.20, "name_cn": "经济社会增值"}
+    }
+  },
+  "quality": {
+    "min_duration_seconds": 60,
+    "low_personal_std_threshold": 0.5,
+    "overall_inconsistency_threshold": 2.0,
+    "valid_score_threshold": 60,
+    "review_score_threshold": 75,
+    "penalties": {
+      "short_duration": 15,
+      "straight_line": 15,
+      "low_personal_variance": 10,
+      "duplicate_answer_pattern": 10,
+      "duplicate_ip": 5,
+      "overall_inconsistency": 15
+    },
+    "placeholder_texts": ["", "(空)", "空", "无", "没有", "暂无", "没有不舒适", "无明显不适", "无需改进"]
+  },
+  "split": {"test_ratio": 0.20, "random_seed": 42},
+  "privacy": {"retain_raw_ip": false},
+  "model_dataset": {"include_question_items": false, "include_derived_dimensions": false},
+  "ai": {
+    "provider": "deepseek",
+    "base_url": "https://api.deepseek.com/chat/completions",
+    "model": "deepseek-v4-flash",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "timeout_seconds": 60,
+    "max_retries": 3,
+    "temperature": 0,
+    "thinking_enabled": true,
+    "reasoning_effort": "high",
+    "max_tokens": 2000,
+    "request_interval_seconds": 0.2
+  }
+}
