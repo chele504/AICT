@@ -153,17 +153,21 @@
 
 #### 标准（标签一致性）
 
-- 问卷量表固定：推荐 5 级 Likert，并按统一规则换算为百分制
-- 评分时间匹配：问卷/专家评分必须对应同一评价对象与时间窗口
-- 多人评分一致性：若为专家评分，建议保留原始分并计算均值及一致性指标
+- **问卷量表固定（项目交付版默认 20 题 / reverse_order）**：5 级 Likert，问卷星按"5、4、3、2、1"顺序的选项位置 1~5 导出 raw 值，`实际分数 = 6 − 导出值`（见 [QUESTIONNAIRE_SCORING_SYSTEM.md](file:///c:/Users/lenovo/Desktop/AICT/QUESTIONNAIRE_SCORING_SYSTEM.md) 第 3、6 节）。
+- **四维权重固定**：技术赋能 0.25 / 游客体验 0.30 / 文化传播 0.25 / 经济社会 0.20。
+- **标签与训练特征分离**：默认 `include_derived_dimensions=false`，四维度分与 `quality_score` **不进入模型训练特征**，仅作为审计与可视化报告使用，防止标签泄漏。
+- 评分时间匹配：问卷/专家评分必须对应同一评价对象与时间窗口。
+- 多人评分一致性：若为专家评分，建议保留原始分并计算均值及一致性指标。
 
 #### 建议采集清单
 
-- 问卷题项原始分 `q1`-`q16`（或按你的问卷版本）
-- 四个一级指标百分制得分（便于解释与报告输出）
-- 问卷总分（可直接作为 `target_score`）
+- 问卷题项原始 raw 值 `q1`-`q20`（**不需要手工 reverse_order 转换**，直接保存 raw 值；脚本会自动换算，便于追溯）
+- `review_text`（开放题原文）
+- 四个一级指标百分制得分（可作为审计/可视化输出，默认不入训练特征）
+- 问卷总分（可直接作为 `target_score`，百分制 0~100）
+- 6 项质量罚分命中情况（flag 布尔值）+ `quality_score` + `quality_status`（默认不入训练特征）
 
-计算规则见：[QUESTIONNAIRE_SCORING_SYSTEM.md](file:///c:/Users/lenovo/Desktop/AICT/QUESTIONNAIRE_SCORING_SYSTEM.md)
+计算规则见：[QUESTIONNAIRE_SCORING_SYSTEM.md](file:///c:/Users/lenovo/Desktop/AICT/QUESTIONNAIRE_SCORING_SYSTEM.md)；流水线对接见 [QUESTIONNAIRE_PIPELINE.md](file:///c:/Users/lenovo/Desktop/AICT/QUESTIONNAIRE_PIPELINE.md)。
 
 ### 4.6 行为/轨迹数据（可选增强项）
 

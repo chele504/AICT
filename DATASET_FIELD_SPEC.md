@@ -15,16 +15,16 @@
 
 | 字段名 | 类型 | 是否必填 | 说明 |
 | --- | --- | --- | --- |
-| `review_text` | string | 是 | 文本内容，作为文本模态输入 |
-| `image_path` | string | 是 | 图像文件本地路径，作为图像模态输入 |
-| `audio_path` | string | 语音模式下必填 | 音频文件本地路径，作为语音模态输入 |
-| `target_score` | float | 是 | 样本监督标签，即综合成效评分 |
-| 其他数值列 | int / float | 建议提供 | 自动作为结构化指标输入 |
+| `review_text` | string | 是 | 文本内容，作为文本模态输入；允许空字符串，空值时走 HashTokenizer 占位。 |
+| `image_path` | string | 若 `train.image_column != null` 必填 | 图像文件本地路径。若问卷场景无图像，可将配置设为 `train.image_column: null`（问卷默认就是），此时 CSV 中该列可写固定字符串 `"PLACEHOLDER_IMAGE"`，也可以完全不写该列。 |
+| `audio_path` | string | 若 `train.audio_column != null` 必填 | 音频文件本地路径。同 image_column；问卷默认场景：列值 `"PLACEHOLDER_AUDIO"` 或直接省略不提供列。 |
+| `target_score` | float | 是 | 样本监督标签，即综合成效评分，百分制 0~100 推荐。 |
+| 其他数值列 | int / float | 建议提供 | 自动作为结构化指标输入；**自动剔除整列 NaN / std<=0 / 非有限列**，避免 StandardScaler 除 0 生成 NaN 权重。 |
 
 说明：
 
-- 若当前阶段没有语音数据，可将配置文件中的 `train.audio_column` 设为 `null`，此时 `audio_path` 可以不提供。
-- 除 `review_text`、`image_path`、`audio_path`、`target_score` 外，其余所有数值型字段会自动识别为结构化特征。
+- 若当前阶段没有图像 / 语音数据，可将配置文件中的 `train.image_column: null` / `train.audio_column: null`，此时 `image_path/audio_path` 列可完全省略，代码自动走零占位 tensor（3×224×224 + 梅尔统计占位）。不会再抛 FileNotFoundError / TypeError。
+- 除 `review_text`、`image_path`、`audio_path`、`target_score` 外，其余所有数值型字段会自动识别为结构化特征；非数值列（如 scene_type、dataset_split）会被自动跳过，不会作为模型输入，但可用于分层抽样、分组去噪等。
 
 ## 2. 核心字段详细说明
 
@@ -50,15 +50,15 @@
 
 ### 2.2 `image_path`
 
-- 类型：`string`
-- 含义：与该样本对应的图像文件路径
+- 类型：`string`（允许列值为 `"PLACEHOLDER_IMAGE"`，表示"问卷专用：当前样本无图像；当 `train.image_column: null` 时，列可完全省略，此时 dataset.py 会自动返回 `zeros(3,224,224)` 占位，不会抛 FileNotFoundError。
+- 含义：与该样本对应的图像文件路径（可选）
 - 数据来源建议：
   - 景区现场照片
   - 展馆展陈照片
   - 游客活动照片
   - 监控抽帧图像
 - 填写要求：
-  - 路径必须真实存在
+  - 当列存在时，路径需真实存在；否则走占位符模式
   - 当前实现按单张图像读取
   - 建议使用清晰、内容相关的图片
 
@@ -66,19 +66,20 @@
 
 ```text
 C:\Users\lenovo\Desktop\AICT\examples\demo_images\scene_000.png
+PLACEHOLDER_IMAGE
 ```
 
 ### 2.3 `audio_path`
 
-- 类型：`string`
-- 含义：与该样本对应的语音文件路径
+- 类型：`string`（允许值 `"PLACEHOLDER_AUDIO"`，表示问卷专用：样本无语音文件；当 `train.audio_column: null` 时，列可完全省略，自动走梅尔统计占位。
+- 含义：与该样本对应的语音文件路径（可选）
 - 数据来源建议：
   - 游客语音反馈
   - 导览讲解录音
   - 问答交互音频
   - 现场环境中的有效语音片段
 - 填写要求：
-  - 路径必须真实存在
+  - 当列存在时，路径需真实存在；否则走占位符模式
   - 当前代码建议使用 `WAV` 格式
   - 建议一条样本对应一段主要语音内容
   - 若存在长音频，建议按场景切分后再入库
@@ -87,6 +88,7 @@ C:\Users\lenovo\Desktop\AICT\examples\demo_images\scene_000.png
 
 ```text
 C:\Users\lenovo\Desktop\AICT\examples\demo_audio\scene_000.wav
+PLACEHOLDER_AUDIO
 ```
 
 ### 2.4 `target_score`
@@ -235,18 +237,37 @@ review_text,image_path,audio_path,tech_empowerment,visitor_experience,cultural_v
 
 当前默认配置文件见 [configs/default.yaml](file:///c:/Users/lenovo/Desktop/AICT/configs/default.yaml)。
 
-## 9. 最低可用数据要求
+## 9. 最低可用数据要求（两种版本：三模态 / 问卷纯文本+结构化）
 
-若要跑通当前完整四模态版本，至少需要：
+### 9.1 完整三 / 四模态版本（若有图像或语音）
 
-- 1 列文本
-- 1 列图像路径
-- 1 列语音路径
-- 1 列目标分数
+至少需要：
+
+- 1 列文本 `review_text`
+- 1 列图像路径 `image_path`（或 `train.image_column: null` 直接关闭图像列）
+- 1 列语音路径 `audio_path`（或 `train.audio_column: null` 直接关闭语音列）
+- 1 列目标分数 `target_score`
 - 至少 1 列数值型结构化指标
 - （推荐）1 列 scene 标签用于 train/val 分层抽样，1 列 timestamp 用于时序去噪（若你有同一对象的时间序列观测）
 
-若暂时没有语音数据，可关闭语音列配置，先使用文本 + 图像 + 结构化三模态。
+### 9.2 问卷场景：纯文本 + 结构化双模态（推荐，与默认 questionnaire_model.yaml 对齐）
+
+问卷场景下**不需要任何图像/语音文件**，CSV 仅需以下 10 列（即 `process_questionnaire.py` 输出 `aict_dataset.csv` 默认列）：
+
+```csv
+review_text,image_path,audio_path,duration_seconds,has_meaningful_feedback,ai_has_discomfort,ai_sentiment_score,ai_confidence,target_score,dataset_split
+```
+
+- `image_path` / `audio_path` 值固定为 `"PLACEHOLDER_IMAGE"` 与 `"PLACEHOLDER_AUDIO"`（或**直接不提供这两列**，并在模型配置中写：
+  ```yaml
+  train:
+    image_column: null
+    audio_column: null
+  ```
+  此时 dataset.py 自动返回 224×224 0 矩阵 + 梅尔统计占位，不再强要求文件存在。
+- 结构化特征自动识别出 5 列：`duration_seconds / has_meaningful_feedback / ai_has_discomfort / ai_sentiment_score / ai_confidence`；**已默认剔除四维度分与 quality_score，防止标签泄漏**。
+
+> 若暂时没有图像或语音数据，可关闭对应列配置，直接使用文本 + 结构化双模态即可跑通端到端流水线与 HTML 报告。
 
 ## 10. 面向课题的推荐采集方案
 
